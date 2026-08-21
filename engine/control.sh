@@ -89,13 +89,28 @@ case "$arg" in
     # Built with jq, not string interpolation: Apple names carry spaces and
     # parentheses, and one stray quote would produce invalid JSON.
     voicef="$DIR/speak.voice.$cur_engine"
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$BASE/voice" \
+    # Generous, because the daemon proves the voice by synthesizing with it, and
+    # for Kokoro that can mean starting a worker (~12s cold) or restarting one in
+    # another language (~6s). At 20s a cold first switch timed out, and a timeout
+    # is indistinguishable from an unreachable daemon — so it was reported as
+    # "takes effect when the engine starts" while the switch actually succeeded
+    # moments later.
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 120 -X POST "$BASE/voice" \
               -H 'Content-Type: application/json' \
               --data "$(jq -nc --arg v "$name" '{voice:$v}')" 2>/dev/null)"
     case "$code" in
-      200)     printf '%s' "$name" >"$voicef"; echo "🗣 Voice set to ${name}" ;;
-      ""|000)  printf '%s' "$name" >"$voicef"; echo "🗣 Voice set to ${name} (takes effect when the engine starts)" ;;
-      *)       echo "Voice '${name}' was rejected — keeping the current one."; exit 1 ;;
+      200) printf '%s' "$name" >"$voicef"; echo "🗣 Voice set to ${name}" ;;
+      ""|000)
+        # No HTTP code: either the daemon isn't there, or we gave up waiting.
+        # Only the first justifies claiming the setting will apply later.
+        if up; then
+          echo "Timed out waiting for the engine to confirm '${name}'."
+          echo "Check with: aloud status"
+          exit 1
+        fi
+        printf '%s' "$name" >"$voicef"
+        echo "🗣 Voice set to ${name} (takes effect when the engine starts)" ;;
+      *)   echo "Voice '${name}' was rejected — keeping the current one."; exit 1 ;;
     esac ;;
   clipboard) pbpaste | "$DIR/say.sh" ;;
   status)

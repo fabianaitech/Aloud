@@ -99,18 +99,22 @@ final class SpeechController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.refresh() }
     }
 
-    /// Apple's installed voices, from the daemon (it owns the `say -v '?'` parse).
-    /// Cached: the menu asks on every open, and the list only changes when someone
-    /// downloads a voice in System Settings.
-    private(set) var appleVoices: [AppleVoice] = []
+    /// Voices per engine, from the daemon — Apple's are whatever the OS has
+    /// installed, Kokoro's are fixed by the pinned model. Both arrive from one
+    /// endpoint so there is a single source of truth, rather than a second copy
+    /// of the list living here. Cached; neither changes often.
+    private(set) var appleVoices: [EngineVoice] = []
+    private(set) var kokoroVoices: [EngineVoice] = []
 
-    func refreshAppleVoices() {
+    func refreshVoices() {
         guard let url = URL(string: "http://127.0.0.1:\(port)/voices") else { return }
         session.dataTask(with: url) { [weak self] data, _, _ in
             guard let self, let data else { return }
-            let decoded = try? JSONDecoder().decode([String: [AppleVoice]].self, from: data)
-            guard let list = decoded?["apple"], !list.isEmpty else { return }
-            DispatchQueue.main.async { self.appleVoices = list }
+            let decoded = try? JSONDecoder().decode([String: [EngineVoice]].self, from: data)
+            DispatchQueue.main.async {
+                if let a = decoded?["apple"], !a.isEmpty { self.appleVoices = a }
+                if let k = decoded?["kokoro"], !k.isEmpty { self.kokoroVoices = k }
+            }
         }.resume()
     }
 

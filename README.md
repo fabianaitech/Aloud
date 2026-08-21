@@ -34,6 +34,35 @@ long listening, overkill for a paragraph.
 Each engine remembers its own voice, because `af_heart` and `Isha (Premium)`
 have nothing in common and switching engine shouldn't silently switch voice.
 
+### Kokoro languages
+
+Kokoro ships **54 voices across 9 languages**, all inside the one model file —
+nothing extra to download. The voice name *is* the language: `bf_emma` is
+British, so picking a voice selects the language and there is nothing separate
+to set.
+
+| | Voices | |
+|---|---|---|
+| American English | 20 | works out of the box |
+| British English | 8 | works out of the box |
+| Hindi | 4 | works out of the box |
+| Spanish · Portuguese | 3 · 3 | works out of the box |
+| Italian · French | 2 · 1 | works out of the box |
+| Japanese | 5 | needs `misaki[ja]` |
+| Mandarin Chinese | 8 | needs `misaki[zh]` |
+
+`aloud voices` lists them grouped by language, and the menu bar nests them the
+same way. Switching language restarts the synth worker (~6s), because Kokoro
+fixes a pipeline's language when it is constructed.
+
+Japanese and Chinese need a package that isn't installed by default — they pull
+in a lot for two languages most users won't touch. Rather than mispronouncing,
+Aloud refuses the voice and names what's missing:
+
+```bash
+~/.aloud/.venv/bin/python -m pip install 'misaki[ja]'   # or misaki[zh]
+```
+
 ## Install
 
 ```bash
@@ -119,8 +148,9 @@ aloud clipboard                # speak the clipboard
 
 aloud status                   # what the engine is doing
 aloud engine apple             # or: kokoro
-aloud voice "Zoe (Enhanced)"
-aloud voices                   # what the current engine offers
+aloud voice "Zoe (Enhanced)"   # Apple
+aloud voice bf_emma            # Kokoro — British; switches language too
+aloud voices                   # grouped by language (Kokoro) or tier (Apple)
 aloud 1.25                     # speed
 aloud pause | resume | stop | skip
 aloud start | restart | stop-engine
@@ -142,7 +172,9 @@ Environment variables, read when the daemon starts:
 | `ALOUD_SPEED` | `1.0` | Default speed (0.5–2.0) |
 | `ALOUD_IDLE_TIMEOUT` | `600` | Seconds before the Kokoro worker is killed. `0` keeps it resident |
 | `KOKORO_VOICE` | `af_heart` | Kokoro's boot voice (engine-specific, hence the prefix) |
-| `KOKORO_LANG` | `a` | Kokoro pipeline language: `a` American, `b` British English |
+
+Kokoro's language is **not** configured — it is read off the voice name, and the
+worker restarts when it changes. `KOKORO_LANG` is set per worker by the daemon.
 
 Settings live in `~/.aloud/` as one-line files (`speak.engine`, `speak.speed`,
 `speak.voice.apple`, `speak.voice.kokoro`, `speak.enabled`) so the shell, the
