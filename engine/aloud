@@ -55,19 +55,29 @@ case "$cmd" in
     exec "$DIR/control.sh" "$1" ;;
 
   voices)
-    # Kokoro's list is fixed and lives in the app; Apple's is whatever is
-    # installed, which only the daemon can answer.
+    # Both lists come from the daemon, so there is one source of truth: Apple's
+    # is whatever the OS has installed, Kokoro's is fixed by the pinned model.
     engine="$(cat "$DIR/speak.engine" 2>/dev/null || echo apple)"
+    js="$(curl -s --max-time 5 "$BASE/voices" 2>/dev/null)"
+    if [ -z "$js" ]; then
+      echo "aloud: the engine isn't running — start it with: aloud start" >&2
+      exit 1
+    fi
+    current="$(curl -s --max-time 3 "$BASE/state" 2>/dev/null | jq -r '.voice // ""' 2>/dev/null)"
     if [ "$engine" = kokoro ]; then
-      printf '%s\n' af_heart af_alloy af_aoede af_bella af_jessica af_kore \
-        af_nicole af_nova af_river af_sarah af_sky \
-        am_michael am_adam am_echo am_eric am_fenrir am_liam am_onyx am_puck am_santa
+      # Grouped by language: the voice name is the only thing you select, and
+      # its prefix is the language, so the grouping is the explanation.
+      printf '%s' "$js" | jq -r --arg cur "$current" '
+        .kokoro
+        | group_by(.lang)
+        | sort_by(.[0].lang != "a")
+        | .[]
+        | (.[0].language + (if .[0].extra then "   (needs " + .[0].extra + ")" else "" end)),
+          (.[] | "  " + (if .name == $cur then "*" else " " end) + " " + .name + "  (" + .gender + ")")'
     else
-      if ! curl -s --max-time 3 "$BASE/voices" 2>/dev/null \
-           | jq -r '.apple[] | select(.lang|startswith("en")) | "\(.name)\t\(.lang)\t\(.quality)"' 2>/dev/null; then
-        echo "aloud: the engine isn't running — start it with: aloud start" >&2
-        exit 1
-      fi
+      printf '%s' "$js" | jq -r --arg cur "$current" '
+        .apple[] | select(.lang | startswith("en"))
+        | (if .name == $cur then "*" else " " end) + " " + .name + "\t" + .lang + "\t" + .quality'
     fi ;;
 
   setup) exec "$DIR/setup.sh" ;;

@@ -1,8 +1,9 @@
-// Voices.swift — the two engines Aloud can drive, and the voices each offers.
+// Voices.swift — the engines Aloud can drive, and the shape of a voice.
 //
-// Kokoro's list is fixed, so it ships here. Apple's is whatever the user has
-// downloaded in System Settings, so it comes from the daemon's GET /voices —
-// one parser, shared, rather than a second copy of `say -v '?'` scraping here.
+// Neither voice list lives here. Apple's is whatever the user has downloaded in
+// System Settings; Kokoro's is fixed by the pinned model. Both come from the
+// daemon's GET /voices, so there is one source of truth rather than a copy here
+// that quietly goes stale.
 
 import Foundation
 
@@ -26,52 +27,27 @@ enum Engine: String, CaseIterable {
     }
 }
 
-struct Voice {
-    let id: String       // what the daemon wants: "af_heart", or "Isha (Premium)"
-    let name: String     // what the menu shows
-}
-
-/// One voice as the daemon reports it from `say -v '?'`.
-struct AppleVoice: Decodable {
+/// One voice, as the daemon reports it. The two engines fill in different
+/// fields — Apple has a quality tier, Kokoro a language and a gender, and
+/// Kokoro's non-default languages name a package they need — so the optionals
+/// also say which engine a voice came from, without needing a second type.
+struct EngineVoice: Decodable {
     let name: String
     let lang: String
-    let quality: String   // "premium" | "enhanced" | "default"
-}
+    /// Apple: "premium" | "enhanced" | "default".
+    let quality: String?
+    /// Kokoro: the readable language, e.g. "British English".
+    let language: String?
+    /// Kokoro: "female" | "male".
+    let gender: String?
+    /// Kokoro: a package this language needs that setup.sh does not install.
+    let extra: String?
 
-enum Voices {
-    /// Kokoro-82M's American English voices. `af_heart` is the shipped default
-    /// and the best-graded of them; the rest are ordered alphabetically.
-    static let female: [Voice] = [
-        Voice(id: "af_heart",   name: "Heart"),
-        Voice(id: "af_alloy",   name: "Alloy"),
-        Voice(id: "af_aoede",   name: "Aoede"),
-        Voice(id: "af_bella",   name: "Bella"),
-        Voice(id: "af_jessica", name: "Jessica"),
-        Voice(id: "af_kore",    name: "Kore"),
-        Voice(id: "af_nicole",  name: "Nicole"),
-        Voice(id: "af_nova",    name: "Nova"),
-        Voice(id: "af_river",   name: "River"),
-        Voice(id: "af_sarah",   name: "Sarah"),
-        Voice(id: "af_sky",     name: "Sky"),
-    ]
-
-    static let male: [Voice] = [
-        Voice(id: "am_michael", name: "Michael"),
-        Voice(id: "am_adam",    name: "Adam"),
-        Voice(id: "am_echo",    name: "Echo"),
-        Voice(id: "am_eric",    name: "Eric"),
-        Voice(id: "am_fenrir",  name: "Fenrir"),
-        Voice(id: "am_liam",    name: "Liam"),
-        Voice(id: "am_onyx",    name: "Onyx"),
-        Voice(id: "am_puck",    name: "Puck"),
-        Voice(id: "am_santa",   name: "Santa"),
-    ]
-
-    static let all: [Voice] = female + male
-
-    /// Display name for whatever the daemon reports, including a voice that isn't
-    /// in the list above (someone set KOKORO_VOICE by hand).
-    static func displayName(for id: String) -> String {
-        all.first { $0.id == id }?.name ?? id
+    /// Apple voices show under their own name. Kokoro's are `af_heart`, where the
+    /// prefix is language and gender — both of which the menu already groups by,
+    /// so repeating them in every row is noise.
+    var displayName: String {
+        guard gender != nil, let sep = name.firstIndex(of: "_") else { return name }
+        return String(name[name.index(after: sep)...]).capitalized
     }
 }

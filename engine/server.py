@@ -57,6 +57,62 @@ DEFAULT_VOICE = {"kokoro": "af_heart", "apple": "Samantha"}
 # around here, so this is what maps our 1.0x onto "normal".
 APPLE_BASE_WPM = 175
 
+# Kokoro's language codes. A voice name begins with its own code — "bf_emma" is
+# British — so the voice determines the language and there is nothing separate to
+# choose. `extra` names the dependency that language needs beyond what
+# requirements.txt installs; None means it works out of the box.
+DEFAULT_LANG = "a"
+KOKORO_LANGS = {
+    "a": {"name": "American English", "extra": None},
+    "b": {"name": "British English", "extra": None},
+    "e": {"name": "Spanish", "extra": None},
+    "f": {"name": "French", "extra": None},
+    "h": {"name": "Hindi", "extra": None},
+    "i": {"name": "Italian", "extra": None},
+    "p": {"name": "Brazilian Portuguese", "extra": None},
+    "j": {"name": "Japanese", "extra": "misaki[ja]"},
+    "z": {"name": "Mandarin Chinese", "extra": "misaki[zh]"},
+}
+
+
+# Every voice in Kokoro-82M, by language. Hardcoded rather than read from the
+# model directory so the list is answerable before anything is downloaded — the
+# menu can show what you would get. The model is pinned, so this cannot drift.
+KOKORO_VOICES = {
+    "a": ["af_heart", "af_alloy", "af_aoede", "af_bella", "af_jessica", "af_kore",
+          "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky",
+          "am_michael", "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam",
+          "am_onyx", "am_puck", "am_santa"],
+    "b": ["bf_emma", "bf_alice", "bf_isabella", "bf_lily",
+          "bm_george", "bm_daniel", "bm_fable", "bm_lewis"],
+    "e": ["ef_dora", "em_alex", "em_santa"],
+    "f": ["ff_siwis"],
+    "h": ["hf_alpha", "hf_beta", "hm_omega", "hm_psi"],
+    "i": ["if_sara", "im_nicola"],
+    "p": ["pf_dora", "pm_alex", "pm_santa"],
+    "j": ["jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro", "jm_kumo"],
+    "z": ["zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
+          "zm_yunjian", "zm_yunxi", "zm_yunxia", "zm_yunyang"],
+}
+
+
+def lang_of(voice):
+    """A Kokoro voice's language code is its first character."""
+    return voice[0] if voice and voice[0] in KOKORO_LANGS else DEFAULT_LANG
+
+
+def kokoro_voices():
+    """Every Kokoro voice, tagged with its language and whether that language
+    needs a package we don't install by default."""
+    out = []
+    for code, names in KOKORO_VOICES.items():
+        meta = KOKORO_LANGS[code]
+        for n in names:
+            out.append({"name": n, "lang": code, "language": meta["name"],
+                        "gender": "female" if n[1] == "f" else "male",
+                        "extra": meta["extra"]})
+    return out
+
 # Per engine, because the names have nothing in common ("af_heart" vs
 # "Isha (Premium)") and switching engines should not silently mean switching to
 # some other engine's idea of a voice.
@@ -105,7 +161,10 @@ def valid_voice(engine, name):
     """Cheap shape check only. Whether the voice actually *exists* is settled by
     trying to synthesize with it — see set_voice."""
     if engine == "kokoro":
-        return bool(re.fullmatch(r"[a-z]{2}_[a-z]+", name or ""))
+        # The voice set is fixed by the pinned model, so a name that isn't in it
+        # is a typo. Catching it here avoids spawning a worker — possibly in a
+        # different language, a ~6s round trip — only to fail.
+        return any(name in names for names in KOKORO_VOICES.values())
     # Apple names are free-form ("Isha (Premium)", "Eddy (English (UK))"). They go
     # to `say` as one argv element, never through a shell, so the only thing worth
     # refusing is something that isn't a plausible name at all.
@@ -162,17 +221,30 @@ class Worker:
         # happening" from "waking up right now", and those look very different to
         # someone waiting for their first sentence.
         self.loading = False
+        # The language this worker was built for. KPipeline fixes its language at
+        # construction, so changing it means a new process — see ensure_lang.
+        self.lang = None
 
     def alive(self):
         p = self.proc
         return p is not None and p.poll() is None
 
+    def ensure_lang(self, lang):
+        """Make the next request run under `lang`, restarting the worker if the
+        running one was built for a different one. Caller holds the lock."""
+        if self.alive() and self.lang != lang:
+            print(f"[aloud] language {self.lang} -> {lang}, restarting the worker", flush=True)
+            self.kill(quiet=True)
+        self.lang = lang
+
     def _spawn(self):
         """Start the worker and block until it reports ready. Caller holds the lock."""
         t0 = time.monotonic()
         self.loading = True
-        print("[aloud] starting synth worker ...", flush=True)
+        lang = self.lang or DEFAULT_LANG
+        print(f"[aloud] starting synth worker (lang={lang}) ...", flush=True)
         try:
+            env = dict(os.environ, KOKORO_LANG=lang)
             self.proc = subprocess.Popen(
                 [worker_python(), WORKER],
                 stdin=subprocess.PIPE,
@@ -180,6 +252,7 @@ class Worker:
                 # stderr is inherited: the worker's own logging lands in server.log.
                 text=True,
                 bufsize=1,
+                env=env,
             )
             while True:
                 line = self.proc.stdout.readline()
@@ -197,10 +270,15 @@ class Worker:
             self.loading = False
         print(f"[aloud] synth worker ready in {time.monotonic() - t0:.1f}s", flush=True)
 
-    def request(self, payload):
-        """Send one request and return its reply, starting the worker if needed."""
+    def request(self, payload, lang=None):
+        """Send one request and return its reply, starting the worker if needed.
+
+        `lang` is applied under the same lock as the send, so a language switch
+        can't land between the restart and the request it was meant for."""
         with self.lock:
             self.last_use = time.monotonic()
+            if lang:
+                self.ensure_lang(lang)
             if not self.alive():
                 self._spawn()
             self._id += 1
@@ -300,8 +378,12 @@ def synth_to_file(text, speed, path, voice=None, engine=None):
     if (engine or ENGINE) == "apple":
         apple_synth(text, speed, path, voice)
     else:
-        worker.request({"text": text, "speed": speed,
-                        "voice": voice or VOICES["kokoro"], "out": path})
+        v = voice or VOICES["kokoro"]
+        # The voice decides the language on every request. A pipeline in the
+        # wrong language does not fail — it mispronounces — so this is worth
+        # checking each time rather than trusting set_voice to be the only path in.
+        worker.request({"text": text, "speed": speed, "voice": v, "out": path},
+                       lang=lang_of(v))
 
 
 def idle_reaper():
@@ -341,13 +423,30 @@ def set_voice(name, engine=None):
         return False
     if name == VOICES[engine]:
         return True
+    previous_lang = worker.lang
     try:
         if engine == "apple":
             if not apple_voice_exists(name):
                 raise RuntimeError("no such voice — see `say -v '?'`")
         else:
-            worker.request({"check_voice": name})
+            # The voice carries its language, and KPipeline fixes that at
+            # construction, so a cross-language switch means a new worker. Passing
+            # the language here means the check runs under the pipeline that will
+            # actually speak this voice.
+            worker.request({"check_voice": name}, lang=lang_of(name))
     except Exception as e:  # noqa: BLE001 — any failure means "keep the old voice"
+        # Missing language extras surface here as an import error from the
+        # worker. Say which package, rather than leaving a bare traceback in a
+        # log the user will never read.
+        if engine == "kokoro":
+            # Put the language back, so the next request doesn't inherit a
+            # pipeline built for a voice we just refused.
+            with worker.lock:
+                worker.ensure_lang(previous_lang or lang_of(VOICES["kokoro"]))
+            extra = KOKORO_LANGS.get(lang_of(name), {}).get("extra")
+            if extra:
+                print(f"[aloud] {KOKORO_LANGS[lang_of(name)]['name']} needs an extra package: "
+                      f"~/.aloud/.venv/bin/python -m pip install '{extra}'", flush=True)
         print(f"[aloud] voice '{name}' rejected: {e}", flush=True)
         return False
     VOICES[engine] = name
@@ -572,6 +671,11 @@ def state():
         "engine": ENGINE,
         "voice": VOICES[ENGINE],
         "voices": dict(VOICES),   # so a menu can tick the right one per engine
+        # Kokoro's language, derived from its voice — there is nothing separate
+        # to set. Reported so a UI can show "British English" next to bf_emma.
+        "lang": lang_of(VOICES["kokoro"]) if ENGINE == "kokoro" else None,
+        "language": (KOKORO_LANGS[lang_of(VOICES["kokoro"])]["name"]
+                     if ENGINE == "kokoro" else None),
         # False once the idle reaper has stopped the synth worker. The daemon is
         # still up and will speak — the next request just pays the wake-up first.
         # "loaded" means ready to synthesize, not merely spawned — a worker that is
@@ -641,7 +745,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/voices"):
             # Apple's list is whatever is installed, so it has to be discovered.
             # Kokoro's is fixed and the menubar ships it.
-            self._json(200, {"apple": apple_voices()})
+            self._json(200, {"apple": apple_voices(), "kokoro": kokoro_voices()})
         elif self.path.startswith("/state"):
             self._json(200, state())
         else:

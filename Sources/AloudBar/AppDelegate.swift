@@ -9,7 +9,7 @@
 // and Kokoro (better voices, 1.2GB while warm). The daemon does the switching;
 // this only presents it, with the trade-off written next to the choice.
 //
-// Speaking the *selection* is a macOS Service ("Speak with Kokoro"), not a menu
+// Speaking the *selection* is a macOS Service ("Speak with Aloud"), not a menu
 // item here: reading another app's selection would need Accessibility permission
 // and a synthetic ⌘C, and the Services menu already does it natively.
 
@@ -79,11 +79,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if s != nil { self.startRequestedUntil = nil }
             // Apple's voice list lives in the daemon, so (re)fetch it whenever the
             // daemon appears — including after a restart, when ours is stale.
-            if self.daemonUp && !wasUp { self.speech.refreshAppleVoices() }
+            if self.daemonUp && !wasUp { self.speech.refreshVoices() }
             self.render()
         }
         speech.start()
-        speech.refreshAppleVoices()
+        speech.refreshVoices()
     }
 
     /// True while the engine is on its way up — either the supervisor is still
@@ -262,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let shortcut = NSMenuItem(title: "Selection Shortcut…",
                                   action: #selector(openServicesSettings), keyEquivalent: "")
         shortcut.target = self
-        shortcut.toolTip = "Speaking the selected text is the \"Speak with Kokoro\" Service. "
+        shortcut.toolTip = "Speaking the selected text is the \"Speak with Aloud\" Service. "
             + "Give it a keyboard shortcut in System Settings."
         menu.addItem(shortcut)
 
@@ -355,19 +355,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         switch engine {
         case .kokoro:
-            header("Female")
-            Voices.female.forEach { entry($0.id, $0.name) }
-            sub.addItem(.separator())
-            header("Male")
-            Voices.male.forEach { entry($0.id, $0.name) }
-            // A voice set by hand via KOKORO_VOICE still gets a checkmark rather
-            // than the menu silently showing nothing selected.
-            if !current.isEmpty && !Voices.all.contains(where: { $0.id == current }) {
-                sub.addItem(.separator())
-                let m = NSMenuItem(title: Voices.displayName(for: current), action: nil, keyEquivalent: "")
-                m.state = .on
+            let all = speech.kokoroVoices
+            if all.isEmpty {
+                let m = NSMenuItem(title: daemonUp ? "Loading voices…" : "Engine not running",
+                                   action: nil, keyEquivalent: "")
                 m.isEnabled = false
                 sub.addItem(m)
+                break
+            }
+            // Grouped by language, because in Kokoro the voice *is* the language
+            // choice — `bf_emma` is British — and picking one restarts the worker
+            // under that language. Nested submenus: 54 voices in one flat list is
+            // a scroll, and only one language matters at a time.
+            var seen: [String] = []
+            for v in all where !seen.contains(v.lang) { seen.append(v.lang) }
+            for code in seen {
+                let group = all.filter { $0.lang == code }
+                guard let first = group.first else { continue }
+                var title = first.language ?? code
+                // Say up front that this one needs something installed, rather
+                // than letting the click fail and explaining afterwards.
+                if let extra = first.extra { title += "  (needs \(extra))" }
+
+                let langItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                let langMenu = NSMenu()
+                langMenu.autoenablesItems = false
+                for gender in ["female", "male"] {
+                    let voices = group.filter { $0.gender == gender }
+                    if voices.isEmpty { continue }
+                    let h = NSMenuItem(title: gender.capitalized, action: nil, keyEquivalent: "")
+                    h.isEnabled = false
+                    langMenu.addItem(h)
+                    for v in voices {
+                        let m = NSMenuItem(title: v.displayName,
+                                           action: #selector(setVoice(_:)), keyEquivalent: "")
+                        m.target = self
+                        m.representedObject = v.name
+                        m.state = (v.name == current) ? .on : .off
+                        m.indentationLevel = 1
+                        m.toolTip = v.extra.map { "Needs \($0) — see the README" }
+                        langMenu.addItem(m)
+                    }
+                }
+                langItem.submenu = langMenu
+                // Tick the language containing the active voice, so the current
+                // choice is visible without opening every submenu.
+                langItem.state = group.contains { $0.name == current } ? .on : .off
+                sub.addItem(langItem)
             }
 
         case .apple:
@@ -433,7 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func setEngine(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         speech.control("engine", id)
-        if id == Engine.apple.rawValue { speech.refreshAppleVoices() }
+        speech.refreshVoices()
     }
 
     /// Premium and Enhanced voices are a manual download; the compact ones macOS
