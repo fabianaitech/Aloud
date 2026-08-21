@@ -78,7 +78,14 @@ def _flag(path):
 # flag file, and the menubar's checkmark contradicts what you actually hear.
 def _initial_engine():
     e = _flag(ENGINE_FLAG)
-    return e if e in ENGINES else os.environ.get("ALOUD_ENGINE", "apple")
+    if e not in ENGINES:
+        e = os.environ.get("ALOUD_ENGINE", "apple")
+    # Never boot into an engine that can't run. Kokoro without its venv would
+    # come up looking selected and fail every request; Apple always works.
+    if e == "kokoro" and not os.access(os.path.join(FLAG_DIR, ".venv", "bin", "python"), os.X_OK):
+        print("[aloud] kokoro selected but not installed — falling back to apple", flush=True)
+        return "apple"
+    return e
 
 
 def _initial_voice(engine):
@@ -119,6 +126,22 @@ DEFAULT_SPEED = _initial_speed()
 IDLE_TIMEOUT = float(os.environ.get("ALOUD_IDLE_TIMEOUT", "600"))  # 0 disables
 IDLE_CHECK_EVERY = 15.0
 WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "synth.py")
+VENV_PY = os.path.join(FLAG_DIR, ".venv", "bin", "python")
+
+
+def kokoro_available():
+    """Whether the Kokoro engine can run at all — i.e. `aloud setup` has been."""
+    return os.access(VENV_PY, os.X_OK)
+
+
+def worker_python():
+    """The interpreter that can actually import torch and kokoro.
+
+    Deliberately not sys.executable: the supervisor is stdlib-only and will often
+    be running on the system python3, which is what lets the Apple engine work
+    with no setup at all. Handing that down to the worker would fail every
+    import it makes."""
+    return VENV_PY if kokoro_available() else sys.executable
 
 
 class Worker:
@@ -151,7 +174,7 @@ class Worker:
         print("[aloud] starting synth worker ...", flush=True)
         try:
             self.proc = subprocess.Popen(
-                [sys.executable, WORKER],
+                [worker_python(), WORKER],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 # stderr is inherited: the worker's own logging lands in server.log.
@@ -341,6 +364,12 @@ def set_engine(name):
         return False
     if name == ENGINE:
         return True
+    # Refuse rather than accept and then be mute: without the venv the worker
+    # cannot import torch, and every later request would fail one at a time with
+    # no hint that the real answer is "run `aloud setup`".
+    if name == "kokoro" and not kokoro_available():
+        print("[aloud] kokoro not installed — run `aloud setup`", flush=True)
+        return False
     ENGINE = name
     print(f"[aloud] engine -> {name}", flush=True)
     if name != "kokoro":

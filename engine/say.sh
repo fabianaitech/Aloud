@@ -32,7 +32,10 @@ die() { note "$1"; echo "$1" >&2; exit 1; }
 if [ "$#" -gt 0 ]; then text="$*"; else text="$(cat)"; fi
 [ -n "${text//[[:space:]]/}" ] || exit 0
 
-[ -x "$DIR/.venv/bin/python" ] || die "Not installed — run ~/.aloud/setup.sh first."
+# Check for the daemon, not for the Kokoro venv: the Apple engine needs no
+# Python packages at all, and gating on the venv made a fresh Apple-only install
+# refuse to speak.
+[ -x "$DIR/start.sh" ] || die "Aloud is not installed — see github.com/fabianaitech/Aloud"
 
 # Start the daemon on demand and wait for it (a cold start warms the model on
 # MPS, ~11s). A hook can afford to skip a turn; a menu item the user just

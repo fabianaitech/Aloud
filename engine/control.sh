@@ -58,11 +58,22 @@ case "$arg" in
       apple|kokoro) ;;
       *) echo "Usage: control.sh engine <apple|kokoro>"; exit 1 ;;
     esac
+    # A refusal (400) and an unreachable daemon are different answers: the first
+    # means "no", the second means "not yet". Writing the flag on a refusal would
+    # persist a choice the daemon just rejected, and boot into it next time.
     code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST "$BASE/engine" \
               -H 'Content-Type: application/json' --data "{\"engine\":\"${eng}\"}" 2>/dev/null)"
-    printf '%s' "$eng" >"$ENGINEF"
-    if [ "$code" = "200" ]; then echo "🎛 Engine set to ${eng}"
-    else echo "🎛 Engine set to ${eng} (takes effect when the engine starts)"; fi ;;
+    case "$code" in
+      200)    printf '%s' "$eng" >"$ENGINEF"; echo "🎛 Engine set to ${eng}" ;;
+      ""|000) printf '%s' "$eng" >"$ENGINEF"
+              echo "🎛 Engine set to ${eng} (takes effect when the engine starts)" ;;
+      *)      if [ "$eng" = kokoro ] && [ ! -x "$DIR/.venv/bin/python" ]; then
+                echo "The Kokoro engine isn't installed. Run: aloud setup"
+              else
+                echo "Engine '${eng}' was refused — keeping the current one."
+              fi
+              exit 1 ;;
+    esac ;;
   voice)
     # The daemon validates by actually synthesizing with the voice, so a typo is
     # refused rather than silently muting on the next request. Apple voice names

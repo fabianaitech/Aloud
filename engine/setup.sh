@@ -82,9 +82,12 @@ done
 
 cat <<EOF
 
-✅ Kokoro TTS is set up.
-   • Restart Claude Code so the Stop / UserPromptSubmit hooks load.
-   • Control it with the /speak command (on off faster slower stop status)
-     or from the Claude Island header glyph / gear menu.
-   • Not using a LaunchAgent? The Stop hook lazy-starts the daemon on demand.
+✅ The Kokoro engine is set up.
+
+   Switch to it:   aloud engine kokoro
+   Pick a voice:   aloud voices   /   aloud voice am_puck
+   Back to Apple:  aloud engine apple
+
+   Kokoro holds ~1.26 GB while warm and is dropped after 10 idle minutes;
+   switching back to Apple hands that memory back immediately.
 EOF

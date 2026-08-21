@@ -1,5 +1,13 @@
-# Local Kokoro TTS daemon dependencies (Apple Silicon / MPS).
-# torch is pulled in transitively by kokoro; not pinned here so the resolver can
-# pick the right wheel for the host. espeak-ng is a system dep (see setup.sh).
+# Dependencies for the optional Kokoro engine (Apple Silicon / MPS).
+# Only synth.py imports these; the supervisor is stdlib-only.
+# espeak-ng is a system dependency, installed by setup.sh via Homebrew.
 kokoro==0.9.4
 soundfile==0.14.0
+
+# transformers 5.15 breaks kokoro 0.9.4 — the worker loads torch, then dies
+# during pipeline construction. Left unpinned this resolves to whatever shipped
+# most recently, so a fresh install was simply broken while an older machine
+# kept working: the worst kind of bug to find by report rather than by testing.
+# torch stays unpinned so the resolver can pick the right wheel for the host;
+# it was not the culprit (2.13.0 works either way).
+transformers>=5.14,<5.15
