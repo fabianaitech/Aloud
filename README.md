@@ -38,14 +38,29 @@ have nothing in common and switching engine shouldn't silently switch voice.
 
 ```bash
 git clone https://github.com/fabianaitech/Aloud.git
-cd Aloud
-./install.sh          # engine + Services. Apple's voices work immediately.
-./_dev/install.sh     # optional: the menu-bar app
-~/.aloud/setup.sh     # optional: the Kokoro engine (needs uv)
+cd Aloud && ./install.sh
 ```
 
-Requires macOS 13+. The menu-bar app builds with the Swift toolchain that ships
-with Xcode or the Command Line Tools; it has no third-party dependencies.
+That's it — engine, Services and the menu-bar app. Apple's voices work
+immediately; there's nothing to download. Add `--no-app` to skip the app if you
+only want the Services and the CLI.
+
+Requires macOS 13+. The app builds with the Swift toolchain from Xcode or the
+Command Line Tools and has no third-party dependencies.
+
+**Why build instead of downloading a `.dmg`?** The app is ad-hoc signed, not
+notarized. macOS attaches a quarantine flag to *downloaded* files, so a `.dmg`
+would greet you with "Apple could not verify this app is free of malware". A
+locally built copy has no such flag and simply runs. One command either way.
+
+Optionally, for better voices:
+
+```bash
+aloud setup           # Kokoro engine (~330 MB model, needs uv)
+```
+
+…and Apple's own good voices (Premium/Enhanced) are a free download under
+System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.
 
 Give **Speak with Aloud** a keyboard shortcut under System Settings → Keyboard →
 Keyboard Shortcuts → Services. That is what turns it from a menu dive into a
@@ -56,7 +71,7 @@ reflex.
 ```
 Services menu ──┐  any selected text
 menu-bar app ───┼─▶ control.sh ─▶ server.py  ──▶ afplay
-CLI (say.sh) ───┘                 ~24 MB, always up
+CLI (aloud) ────┘                 ~24 MB, always up
                                   queue + pause/stop/skip
                                        │
                           ┌────────────┴────────────┐
@@ -95,17 +110,26 @@ The animation runs only while audio is actually playing.
 
 ## CLI
 
-```bash
-echo "hello" | ~/.aloud/say.sh     # speak stdin
-pbpaste | ~/.aloud/say.sh          # speak the clipboard
+`install.sh` links an `aloud` command onto your PATH.
 
-~/.aloud/control.sh status
-~/.aloud/control.sh engine apple   # or: kokoro
-~/.aloud/control.sh voice "Zoe (Enhanced)"
-~/.aloud/control.sh 1.25           # speed
-~/.aloud/control.sh pause | resume | stop | skip
-~/.aloud/control.sh start | restart | stop-engine
+```bash
+aloud "the build is green"     # speak some text
+git log -1 --format=%s | aloud # speak stdin
+aloud clipboard                # speak the clipboard
+
+aloud status                   # what the engine is doing
+aloud engine apple             # or: kokoro
+aloud voice "Zoe (Enhanced)"
+aloud voices                   # what the current engine offers
+aloud 1.25                     # speed
+aloud pause | resume | stop | skip
+aloud start | restart | stop-engine
+aloud setup                    # install the optional Kokoro engine
 ```
+
+Anything that isn't a known subcommand is treated as text to speak, so
+`aloud "check the deploy"` does the obvious thing. Use `aloud say <text>` if the
+text might collide with a subcommand name.
 
 ## Configuration
 
@@ -135,9 +159,10 @@ knows nothing about it.
 ## Uninstall
 
 ```bash
-~/.aloud/stop.sh
+aloud stop-engine
 launchctl bootout "gui/$(id -u)/com.fabianaitech.aloud.engine" 2>/dev/null   # if installed
 rm -rf ~/.aloud /Applications/Aloud.app
+rm -f  "$(command -v aloud)"
 rm -rf ~/Library/Services/"Speak with Aloud.workflow" \
        ~/Library/Services/"Stop speaking (Aloud).workflow"
 /System/Library/CoreServices/pbs -flush

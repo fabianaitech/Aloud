@@ -41,7 +41,7 @@ Restart Claude Code so the hooks load.
 turn is simply silent. Earlier versions lazy-started it, which quietly undid a
 deliberate "Stop Engine" on the very next reply — with Kokoro selected that is
 ~1.26 GB reappearing because of something you never saw happen. Start it from
-the menu bar, or with `~/.aloud/control.sh start`.
+the menu bar, or with `aloud start`.
 
 **It is a no-op until Aloud is installed.** The hooks bail out when `~/.aloud`
 isn't there, so dropping them into a shared config never forces speech on

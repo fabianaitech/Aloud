@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Install Aloud's speech engine and macOS Services.
+# Install Aloud.
 #
-#   ./install.sh
+#   ./install.sh              engine + Services + the menu-bar app
+#   ./install.sh --no-app     skip the app (Services and CLI only, no Swift needed)
 #
 # Installs:
-#   engine/    -> ~/.aloud            the daemon, its control script and helpers
-#   services/  -> ~/Library/Services  "Speak with Aloud" / "Stop speaking (Aloud)"
+#   engine/    -> ~/.aloud             the daemon, its control script and helpers
+#   services/  -> ~/Library/Services   "Speak with Aloud" / "Stop speaking (Aloud)"
+#   the app    -> /Applications/Aloud.app
 #
-# Does NOT build the menubar app — that's ./_dev/install.sh, kept separate so you
-# can use the Services and the CLI without ever compiling Swift.
+# Building locally rather than shipping a .dmg is deliberate: the app is ad-hoc
+# signed, not notarized, so a *downloaded* copy carries a quarantine flag and
+# Gatekeeper warns about malware. A locally built one doesn't, and just runs.
 #
 # Re-running is safe: your Python venv, your settings (speak.*) and the logs are
 # left alone; only the code is replaced.
@@ -17,12 +20,41 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIR="$HOME/.aloud"
 
+WITH_APP=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-app) WITH_APP=0 ;;
+    -h|--help) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown option: $arg" >&2; exit 1 ;;
+  esac
+done
+
 echo "==> installing the engine to $DIR"
 mkdir -p "$DIR"
-for f in server.py synth.py control.sh say.sh start.sh stop.sh setup.sh requirements.txt; do
+for f in server.py synth.py control.sh say.sh start.sh stop.sh setup.sh requirements.txt aloud; do
   cp "$here/engine/$f" "$DIR/$f"
 done
-chmod +x "$DIR"/*.sh
+chmod +x "$DIR"/*.sh "$DIR/aloud"
+
+# Put `aloud` on PATH. First writable candidate wins; no sudo, and no editing
+# anyone's shell rc behind their back — if none of these are usable we say so
+# and the command still works by its full path.
+link_dir=""
+for d in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
+  if [[ -d "$d" && -w "$d" ]] || { [[ "$d" == "$HOME/.local/bin" ]] && mkdir -p "$d" 2>/dev/null; }; then
+    link_dir="$d"; break
+  fi
+done
+if [[ -n "$link_dir" ]]; then
+  ln -sf "$DIR/aloud" "$link_dir/aloud"
+  echo "==> linked the aloud command into $link_dir"
+  case ":$PATH:" in
+    *":$link_dir:"*) ;;
+    *) echo "    note: $link_dir isn't on your PATH — add it, or use $DIR/aloud" ;;
+  esac
+else
+  echo "==> couldn't link the aloud command anywhere on PATH; use $DIR/aloud"
+fi
 
 # Migrate settings from the pre-1.0 location, once, if they're there and we have
 # none. Losing your voice and speed on upgrade is a small thing that feels bad.
@@ -49,16 +81,37 @@ if [[ -x /System/Library/CoreServices/pbs ]]; then
   /System/Library/CoreServices/pbs -flush || true
 fi
 
+if [[ "$WITH_APP" == 1 ]]; then
+  if command -v swift >/dev/null 2>&1; then
+    echo "==> building and installing the menu-bar app"
+    "$here/_dev/install.sh" | sed 's/^/    /'
+  else
+    echo "==> skipping the menu-bar app: no Swift toolchain found"
+    echo "    install Xcode or the Command Line Tools (xcode-select --install),"
+    echo "    then re-run ./install.sh. Everything else already works."
+    WITH_APP=0
+  fi
+fi
+
 cat <<EOF
 
 Done. Apple's built-in engine works immediately — nothing else to install.
 
-  Speak something:   echo "hello" | ~/.aloud/say.sh
-  Check the state:   ~/.aloud/control.sh status
+  Speak something:   aloud "hello there"
+  Check the state:   aloud status
+EOF
 
-Next, optionally:
-  * The menubar app:      ./_dev/install.sh
-  * The Kokoro engine:    ~/.aloud/setup.sh      (better voices; ~330MB model, needs uv)
+[[ "$WITH_APP" == 1 ]] && echo "  The app:           /Applications/Aloud.app (in your menu bar now)"
+
+cat <<EOF
+
+Worth doing once:
   * A keyboard shortcut:  System Settings -> Keyboard -> Keyboard Shortcuts ->
                           Services -> "Speak with Aloud"
+
+Optional:
+  * Better voices:        aloud setup            (Kokoro; ~330MB model, needs uv)
+  * Apple's good voices:  System Settings -> Accessibility -> Spoken Content ->
+                          System Voice -> Manage Voices (the shipped ones are
+                          the dated compact tier)
 EOF

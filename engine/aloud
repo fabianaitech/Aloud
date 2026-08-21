@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# aloud — the command line front end.
+#
+#   aloud "hello there"          speak some text
+#   echo hi | aloud              speak stdin
+#   pbpaste | aloud              speak the clipboard (or: aloud clipboard)
+#
+#   aloud status                 what the engine is doing
+#   aloud engine apple|kokoro    switch engine
+#   aloud voice "Zoe (Enhanced)" switch the current engine's voice
+#   aloud voices                 list what the current engine offers
+#   aloud speed 1.25             or just: aloud 1.25
+#   aloud pause|resume|stop|skip
+#   aloud start|restart|stop-engine
+#   aloud on|off                 whether Claude Code's replies are spoken
+#   aloud setup                  install the optional Kokoro engine
+#
+# Anything that isn't a known subcommand is treated as text to speak, so
+# `aloud "check the build"` does the obvious thing. Use `aloud say <text>` when
+# the text might collide with a subcommand name.
+set -o pipefail
+
+DIR="$HOME/.aloud"
+PORT="${ALOUD_PORT:-8877}"
+BASE="http://127.0.0.1:${PORT}"
+
+if [ ! -x "$DIR/control.sh" ]; then
+  echo "aloud: not installed — expected $DIR/control.sh" >&2
+  echo "       see https://github.com/fabianaitech/Aloud" >&2
+  exit 1
+fi
+
+usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; }
+
+cmd="${1:-}"
+case "$cmd" in
+  -h|--help|help)
+    # Explicit: always help, whether or not stdin is a terminal. Asking for help
+    # down a pipe and being read your own input back is not a useful answer.
+    usage; exit 0 ;;
+
+  ""|-)
+    # Bare `aloud`: a pipe means "speak stdin", a terminal means "help" — a
+    # command that silently waits for input looks like a hang.
+    if [ -t 0 ] && [ "$cmd" != "-" ]; then usage; exit 0; fi
+    exec "$DIR/say.sh" ;;
+
+  say)
+    shift
+    if [ "$#" -gt 0 ]; then exec "$DIR/say.sh" "$@"; else exec "$DIR/say.sh"; fi ;;
+
+  speed)
+    shift
+    [ "$#" -ge 1 ] || { echo "usage: aloud speed <0.5-2.0>" >&2; exit 1; }
+    exec "$DIR/control.sh" "$1" ;;
+
+  voices)
+    # Kokoro's list is fixed and lives in the app; Apple's is whatever is
+    # installed, which only the daemon can answer.
+    engine="$(cat "$DIR/speak.engine" 2>/dev/null || echo apple)"
+    if [ "$engine" = kokoro ]; then
+      printf '%s\n' af_heart af_alloy af_aoede af_bella af_jessica af_kore \
+        af_nicole af_nova af_river af_sarah af_sky \
+        am_michael am_adam am_echo am_eric am_fenrir am_liam am_onyx am_puck am_santa
+    else
+      if ! curl -s --max-time 3 "$BASE/voices" 2>/dev/null \
+           | jq -r '.apple[] | select(.lang|startswith("en")) | "\(.name)\t\(.lang)\t\(.quality)"' 2>/dev/null; then
+        echo "aloud: the engine isn't running — start it with: aloud start" >&2
+        exit 1
+      fi
+    fi ;;
+
+  setup) exec "$DIR/setup.sh" ;;
+
+  # Everything control.sh already understands, passed straight through.
+  on|off|toggle|faster|slower|reset|status|start|restart|stop-engine|\
+  pause|resume|play|stop|skip|next|clipboard|voice|engine)
+    exec "$DIR/control.sh" "$@" ;;
+
+  *)
+    # A bare number is a speed, matching control.sh. Anything else is text.
+    if printf '%s' "$cmd" | grep -qE '^[0-9]+(\.[0-9]+)?x?$' && [ "$#" -eq 1 ]; then
+      exec "$DIR/control.sh" "$cmd"
+    fi
+    exec "$DIR/say.sh" "$@" ;;
+esac
