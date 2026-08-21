@@ -1,0 +1,5 @@
+# Local Kokoro TTS daemon dependencies (Apple Silicon / MPS).
+# torch is pulled in transitively by kokoro; not pinned here so the resolver can
+# pick the right wheel for the host. espeak-ng is a system dep (see setup.sh).
+kokoro==0.9.4
+soundfile==0.14.0
