@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Speak Claude's final response aloud via the local Kokoro TTS daemon.
+# Speak Claude's final response aloud via Aloud (github.com/fabianaitech/Aloud).
 #
 # Wired from settings.json as a second Stop hook (alongside notify.sh):
 #   Stop -> speak.sh stop
@@ -13,9 +13,9 @@ mode="${1:-stop}"
 input="$(cat)"
 [ "$mode" = "stop" ] || exit 0
 
-# Not installed (no TTS venv) → genuine no-op. Lets the shared settings.json ship
-# this hook without affecting anyone who hasn't run aloud/setup.sh.
-[ -x "$HOME/.aloud/.venv/bin/python" ] || exit 0
+# Not installed → genuine no-op. Lets the shared settings.json ship
+# this hook without affecting anyone who has not installed Aloud.
+[ -x "$HOME/.aloud/control.sh" ] || exit 0
 
 # Silent unless enabled (default on).
 FLAG="$HOME/.aloud/speak.enabled"
