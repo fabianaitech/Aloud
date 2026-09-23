@@ -9,10 +9,21 @@ import PackageDescription
 let package = Package(
     name: "AloudBar",
     platforms: [.macOS(.v13)],   // SMAppService (Launch at Login) is macOS 13+.
+    products: [
+        .executable(name: "AloudBar", targets: ["AloudBar"]),
+        // The Apple engine's synthesis helper: Siri voices, and no per-sentence
+        // `say` start-up. Installed to ~/.aloud; the daemon falls back to `say`
+        // without it.
+        .executable(name: "aloud-apple", targets: ["AloudApple"]),
+    ],
     targets: [
         .executableTarget(
             name: "AloudBar",
             swiftSettings: [.swiftLanguageMode(.v5)]
-        )
+        ),
+        .executableTarget(
+            name: "AloudApple",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

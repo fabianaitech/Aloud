@@ -77,7 +77,8 @@ case "$cmd" in
     else
       printf '%s' "$js" | jq -r --arg cur "$current" '
         .apple[] | select(.lang | startswith("en"))
-        | (if .name == $cur then "*" else " " end) + " " + .name + "\t" + .lang + "\t" + .quality'
+        | (if .name == $cur or .id == $cur then "*" else " " end) + " " + .name
+          + "\t" + .lang + "\t" + (if .siri then "siri" else .quality end)'
     fi ;;
 
   setup) exec "$DIR/setup.sh" ;;

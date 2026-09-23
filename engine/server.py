@@ -204,14 +204,21 @@ def worker_python():
 
 
 class Worker:
-    """The synthesis subprocess, started on demand and killed when idle.
+    """A synthesis subprocess, started on demand and killed when idle.
 
-    All the weight (torch, kokoro, the model) lives over there, so this process
-    stays around 22MB. One worker, one request at a time — which is also what the
-    old in-process model_lock enforced, KPipeline not being thread-safe.
+    Kokoro's: all the weight (torch, kokoro, the model) lives over there, so this
+    process stays around 22MB. One worker, one request at a time — which is also
+    what the old in-process model_lock enforced, KPipeline not being thread-safe.
+
+    Apple's (aloud-apple) speaks the same line protocol, for a different reason:
+    a synthesizer that stays up skips the ~0.8s every `say` pays to reach the
+    speech service, and it is the only way to reach the Siri voices at all.
     """
 
-    def __init__(self):
+    def __init__(self, name, argv, env=None):
+        self.name = name
+        self._argv = argv   # () -> the command to start
+        self._env = env     # (worker) -> extra environment, or None
         self.lock = threading.Lock()
         self.proc = None
         self._id = 0
@@ -241,12 +248,11 @@ class Worker:
         """Start the worker and block until it reports ready. Caller holds the lock."""
         t0 = time.monotonic()
         self.loading = True
-        lang = self.lang or DEFAULT_LANG
-        print(f"[aloud] starting synth worker (lang={lang}) ...", flush=True)
+        print(f"[aloud] starting {self.name} worker ...", flush=True)
         try:
-            env = dict(os.environ, KOKORO_LANG=lang)
+            env = dict(os.environ, **(self._env(self) if self._env else {}))
             self.proc = subprocess.Popen(
-                [worker_python(), WORKER],
+                self._argv(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 # stderr is inherited: the worker's own logging lands in server.log.
@@ -258,7 +264,7 @@ class Worker:
                 line = self.proc.stdout.readline()
                 if not line:  # worker died during startup
                     self.proc = None
-                    raise RuntimeError("synth worker exited before becoming ready")
+                    raise RuntimeError(f"{self.name} worker exited before becoming ready")
                 try:
                     if json.loads(line).get("ready"):
                         break
@@ -268,7 +274,7 @@ class Worker:
             # Always clear it, including on the failure paths — a stuck "loading"
             # would leave the menubar spinning forever on a worker that never came.
             self.loading = False
-        print(f"[aloud] synth worker ready in {time.monotonic() - t0:.1f}s", flush=True)
+        print(f"[aloud] {self.name} worker ready in {time.monotonic() - t0:.1f}s", flush=True)
 
     def request(self, payload, lang=None):
         """Send one request and return its reply, starting the worker if needed.
@@ -289,10 +295,10 @@ class Worker:
                 line = self.proc.stdout.readline()
             except (BrokenPipeError, ValueError) as e:
                 self.kill()
-                raise RuntimeError(f"synth worker died: {e}") from e
+                raise RuntimeError(f"{self.name} worker died: {e}") from e
             if not line:
                 self.kill()
-                raise RuntimeError("synth worker died mid-request")
+                raise RuntimeError(f"{self.name} worker died mid-request")
             self.last_use = time.monotonic()  # synthesis itself can take a while
             reply = json.loads(line)
             if not reply.get("ok"):
@@ -310,24 +316,55 @@ class Worker:
         except subprocess.TimeoutExpired:
             p.kill()
         if not quiet:
-            print("[aloud] synth worker stopped (idle)", flush=True)
+            print(f"[aloud] {self.name} worker stopped (idle)", flush=True)
         return True
 
 
-worker = Worker()
+worker = Worker("kokoro", lambda: [worker_python(), WORKER],
+                env=lambda w: {"KOKORO_LANG": w.lang or DEFAULT_LANG})
+
+
+def apple_helper():
+    """The aloud-apple binary, if the app build installed one. Without it (an
+    `install.sh --no-app` install, no Swift toolchain) the engine falls back to
+    `say`: no Siri voices and a slower start per sentence, but it still speaks."""
+    for path in (os.path.join(FLAG_DIR, "aloud-apple"),
+                 "/Applications/Aloud.app/Contents/MacOS/aloud-apple"):
+        if os.access(path, os.X_OK):
+            return path
+    return None
+
+
+apple = Worker("apple", lambda: [apple_helper(), "serve"])
 
 
 _apple_voices = {"at": 0.0, "list": []}
 
 
 def apple_voices():
-    """Voices `say` will accept, from `say -v '?'`, with their language and quality.
+    """Every installed Apple voice, with its language and quality.
+
+    From aloud-apple when it is there — the only source that includes the Siri
+    voices, which `say -v '?'` leaves out — and from `say` otherwise. Each voice
+    carries an `id`: the helper's is the voice identifier, which unlike the name
+    is unique ("Daniel" is listed twice); from `say` it is just the name.
 
     Cached briefly — the list only changes when someone downloads a voice in
     System Settings, and the menu asks for it every time it opens.
     """
     if time.monotonic() - _apple_voices["at"] < 60 and _apple_voices["list"]:
         return _apple_voices["list"]
+    helper = apple_helper()
+    if helper:
+        try:
+            raw = subprocess.run([helper, "voices"], capture_output=True, text=True,
+                                 timeout=15).stdout
+            out = [v for v in json.loads(raw) if v.get("id") and v.get("name")]
+            if out:
+                _apple_voices.update(at=time.monotonic(), list=out)
+                return out
+        except Exception as e:  # noqa: BLE001 — fall through to `say`
+            print(f"[aloud] aloud-apple could not list voices: {e}", flush=True)
     out = []
     try:
         raw = subprocess.run(["say", "-v", "?"], capture_output=True, text=True,
@@ -348,27 +385,42 @@ def apple_voices():
             quality = "premium"
         elif name.endswith("(Enhanced)"):
             quality = "enhanced"
-        out.append({"name": name, "lang": lang, "quality": quality})
+        out.append({"id": name, "name": name, "lang": lang, "quality": quality,
+                    "siri": False})
     if out:
         _apple_voices.update(at=time.monotonic(), list=out)
     return out
+
+
+def apple_voice(key):
+    """The listed voice a stored setting means: by id, or by name for settings
+    saved before voices had ids ("Zoe (Enhanced)"). None if it isn't installed."""
+    voices = apple_voices()
+    return (next((v for v in voices if v["id"] == key), None)
+            or next((v for v in voices if v["name"] == key), None))
 
 
 def apple_voice_exists(name):
     """`say` accepts an unknown -v and quietly uses the default voice instead,
     exiting 0 — so a trial synth proves nothing here and the list is the only
     real check."""
-    return any(v["name"] == name for v in apple_voices())
+    return apple_voice(name) is not None
 
 
 def apple_synth(text, speed, path, voice=None):
-    """Synthesize with macOS's built-in engine. Costs this process nothing: `say`
-    is a short-lived child and the synthesis happens in an OS-owned XPC service.
-    Emitting WAV keeps the output identical to the worker's, so the playback queue
-    (and pause/stop/skip) needs to know nothing about which engine produced it."""
+    """Synthesize with macOS's built-in engine, through aloud-apple when it is
+    installed and `say` otherwise. Both write WAV, identical to the Kokoro
+    worker's output, so the playback queue (and pause/stop/skip) needs to know
+    nothing about which engine produced it."""
+    voice = voice or VOICES["apple"]
+    if apple_helper():
+        apple.request({"text": text, "speed": speed, "voice": voice, "out": path})
+        return
+    # Settings hold ids now; `say` wants the name.
+    v = apple_voice(voice)
     wpm = max(90, min(400, round(APPLE_BASE_WPM * speed)))
     subprocess.run(
-        ["say", "-v", voice or VOICES["apple"], "-r", str(wpm),
+        ["say", "-v", v["name"] if v else voice, "-r", str(wpm),
          "--file-format=WAVE", "--data-format=LEI16@22050", "-o", path, "--", text],
         check=True, capture_output=True, timeout=120,
     )
@@ -401,17 +453,18 @@ def idle_reaper():
         return
     while True:
         time.sleep(IDLE_CHECK_EVERY)
-        if not worker.alive():
-            continue
-        if speaking.is_set() or synth_q.qsize() or play_q.qsize():
-            continue
-        if time.monotonic() - worker.last_use < IDLE_TIMEOUT:
-            continue
-        # Take the request lock so this can't land between a caller's write and
-        # its read, which would leave that request waiting on a dead pipe.
-        with worker.lock:
-            if not speaking.is_set() and time.monotonic() - worker.last_use >= IDLE_TIMEOUT:
-                worker.kill()
+        for w in (worker, apple):
+            if not w.alive():
+                continue
+            if speaking.is_set() or synth_q.qsize() or play_q.qsize():
+                continue
+            if time.monotonic() - w.last_use < IDLE_TIMEOUT:
+                continue
+            # Take the request lock so this can't land between a caller's write
+            # and its read, which would leave that request waiting on a dead pipe.
+            with w.lock:
+                if not speaking.is_set() and time.monotonic() - w.last_use >= IDLE_TIMEOUT:
+                    w.kill()
 
 
 def set_voice(name, engine=None):
@@ -426,8 +479,12 @@ def set_voice(name, engine=None):
     previous_lang = worker.lang
     try:
         if engine == "apple":
-            if not apple_voice_exists(name):
-                raise RuntimeError("no such voice — see `say -v '?'`")
+            v = apple_voice(name)
+            if v is None:
+                raise RuntimeError("no such voice — see `aloud voices`")
+            # Store the id: names aren't unique, and Siri's ("Siri Voice 2")
+            # mean nothing to anything but the helper.
+            name = v["id"]
         else:
             # The voice carries its language, and KPipeline fixes that at
             # construction, so a cross-language switch means a new worker. Passing
@@ -471,9 +528,12 @@ def set_engine(name):
         return False
     ENGINE = name
     print(f"[aloud] engine -> {name}", flush=True)
-    if name != "kokoro":
-        with worker.lock:
-            worker.kill(quiet=True)
+    # Whichever engine we left gives its worker back.
+    idle = worker if name != "kokoro" else apple
+    with idle.lock:
+        idle.kill(quiet=True)
+    if name == "apple":
+        threading.Thread(target=_warm, daemon=True).start()
     return True
 
 
@@ -694,14 +754,23 @@ threading.Thread(target=idle_reaper, daemon=True).start()
 
 
 def _warm():
-    """Bring the Kokoro worker up in the background so the first sentence is
-    instant. Off the main thread: the HTTP port should be answering immediately,
-    not after the model finishes loading — the menubar polls /state to decide the
-    engine is up, and a slow boot used to look like a failed start.
+    """Bring the current engine's worker up in the background so the first
+    sentence is instant. Off the main thread: the HTTP port should be answering
+    immediately, not after the model finishes loading — the menubar polls /state
+    to decide the engine is up, and a slow boot used to look like a failed start.
 
-    Only for Kokoro. Apple has nothing to warm, and starting a 1.26GB worker for
-    an engine you aren't using is precisely the cost this engine avoids."""
-    if ENGINE != "kokoro":
+    Apple: the first utterance per voice costs ~0.9s to reach the speech service;
+    after that it is ~0.07s. Paying it here, rather than on the first sentence,
+    is what makes the engine feel started. Only the current engine is warmed —
+    starting a 1.26GB Kokoro worker for an engine you aren't using is precisely
+    the cost Apple avoids."""
+    if ENGINE == "apple":
+        if apple_helper():
+            try:
+                apple.request({"text": "Ready.", "speed": DEFAULT_SPEED,
+                               "voice": VOICES["apple"], "out": os.path.join(TMPDIR, "warm.wav")})
+            except Exception as e:  # noqa: BLE001
+                print(f"[aloud] warm-up failed: {e}", flush=True)
         return
     try:
         worker.request({"text": "Kokoro is ready.", "speed": DEFAULT_SPEED,
@@ -827,6 +896,7 @@ def _shutdown(signum, frame):
     """Take the worker down with us. It is a child process holding ~1.2GB; an
     orphan of it would keep that memory and go on answering nothing."""
     worker.kill(quiet=True)
+    apple.kill(quiet=True)
     os._exit(0)
 
 

@@ -34,14 +34,26 @@ enum Engine: String, CaseIterable {
 struct EngineVoice: Decodable {
     let name: String
     let lang: String
+    /// Apple: the voice identifier — what the daemon stores, since names aren't
+    /// unique. Absent from Kokoro and from daemons predating Siri support.
+    let id: String?
     /// Apple: "premium" | "enhanced" | "default".
     let quality: String?
+    /// Apple: one of Siri's voices, which only the aloud-apple helper can reach.
+    let siri: Bool?
     /// Kokoro: the readable language, e.g. "British English".
     let language: String?
     /// Kokoro: "female" | "male".
     let gender: String?
     /// Kokoro: a package this language needs that setup.sh does not install.
     let extra: String?
+
+    /// What to send when this voice is picked.
+    var key: String { id ?? name }
+
+    /// Whether the daemon's current voice is this one. Settings saved before
+    /// voices had ids hold the name instead, so accept either.
+    func matches(_ current: String) -> Bool { current == key || current == name }
 
     /// Apple voices show under their own name. Kokoro's are `af_heart`, where the
     /// prefix is language and gender — both of which the menu already groups by,
