@@ -344,13 +344,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             h.isEnabled = false
             sub.addItem(h)
         }
-        func entry(_ id: String, _ title: String) {
+        func entry(_ v: EngineVoice, _ title: String, in menu: NSMenu) {
             let m = NSMenuItem(title: title, action: #selector(setVoice(_:)), keyEquivalent: "")
             m.target = self
-            m.representedObject = id
-            m.state = (id == current) ? .on : .off
+            m.representedObject = v.key
+            m.state = v.matches(current) ? .on : .off
             m.indentationLevel = 1
-            sub.addItem(m)
+            menu.addItem(m)
         }
 
         switch engine {
@@ -413,18 +413,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 sub.addItem(m)
                 break
             }
-            // English only. macOS ships ~185 voices across every language it
-            // supports, which is an unusable menu and mostly not what you want
-            // read to you. Quality tiers first: the default tier is the old
+            // English up front, every other language one level down. macOS
+            // ships ~185 voices across every language it supports, which as one
+            // list is unusable and mostly not what you want read to you — but a
+            // voice someone went and downloaded should still be reachable.
+            //
+            // Siri first, then quality tiers: the default tier is the old
             // compact one and sounds it, so the good voices shouldn't be buried
             // under sixty of them.
+            let tiers: [(String, (EngineVoice) -> Bool)] = [
+                ("Siri", { $0.siri == true }),
+                ("Premium", { $0.siri != true && $0.quality == "premium" }),
+                ("Enhanced", { $0.siri != true && $0.quality == "enhanced" }),
+                ("Standard", { $0.siri != true && ($0.quality ?? "default") == "default" }),
+            ]
+            func title(_ v: EngineVoice, among group: [EngineVoice]) -> String {
+                // Siri's names repeat across accents ("Siri Voice 2" is American
+                // and British), so say which one.
+                guard v.siri == true, group.filter({ $0.name == v.name }).count > 1,
+                      let region = Locale(identifier: v.lang).region?.identifier,
+                      let regionName = Locale.current.localizedString(forRegionCode: region)
+                else { return v.name }
+                return "\(v.name) (\(regionName))"
+            }
+
             let english = all.filter { $0.lang.hasPrefix("en") }
-            for (tier, label) in [("premium", "Premium"), ("enhanced", "Enhanced"), ("default", "Standard")] {
-                let group = english.filter { $0.quality == tier }
+            for (label, test) in tiers {
+                let group = english.filter(test)
                 if group.isEmpty { continue }
                 if sub.numberOfItems > 0 { sub.addItem(.separator()) }
                 header(label)
-                group.sorted { $0.name < $1.name }.forEach { entry($0.name, $0.name) }
+                group.sorted { $0.name < $1.name }.forEach { entry($0, title($0, among: english), in: sub) }
+            }
+
+            let others = all.filter { !$0.lang.hasPrefix("en") }
+            if !others.isEmpty {
+                func languageName(_ code: String) -> String {
+                    Locale.current.localizedString(forIdentifier: code) ?? code
+                }
+                let otherItem = NSMenuItem(title: "Other Languages", action: nil, keyEquivalent: "")
+                let otherMenu = NSMenu()
+                otherMenu.autoenablesItems = false
+                let byLang = Dictionary(grouping: others, by: \.lang)
+                for code in byLang.keys.sorted(by: { languageName($0) < languageName($1) }) {
+                    let group = byLang[code] ?? []
+                    let langItem = NSMenuItem(title: languageName(code), action: nil, keyEquivalent: "")
+                    let langMenu = NSMenu()
+                    langMenu.autoenablesItems = false
+                    for (label, test) in tiers {
+                        let tier = group.filter(test)
+                        if tier.isEmpty { continue }
+                        let h = NSMenuItem(title: label, action: nil, keyEquivalent: "")
+                        h.isEnabled = false
+                        langMenu.addItem(h)
+                        tier.sorted { $0.name < $1.name }.forEach { entry($0, title($0, among: group), in: langMenu) }
+                    }
+                    langItem.submenu = langMenu
+                    // Tick the way to the active voice, so it can be found again.
+                    langItem.state = group.contains { $0.matches(current) } ? .on : .off
+                    otherMenu.addItem(langItem)
+                }
+                otherItem.submenu = otherMenu
+                otherItem.state = others.contains { $0.matches(current) } ? .on : .off
+                sub.addItem(.separator())
+                sub.addItem(otherItem)
             }
             sub.addItem(.separator())
             let more = NSMenuItem(title: "Get More Voices…",

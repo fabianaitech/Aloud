@@ -27,6 +27,12 @@ cp -R "$src" "$dest"
 # download so Gatekeeper doesn't block this ad-hoc-signed (non-notarized) bundle.
 xattr -dr com.apple.quarantine "$dest" 2>/dev/null || true
 
+# The Apple engine's synthesis helper (Siri voices, no per-sentence start-up).
+# The daemon picks it up on its next Apple request; no restart needed.
+echo "==> installing the Apple engine helper to ~/.aloud"
+mkdir -p "$HOME/.aloud"
+cp "$dest/Contents/MacOS/aloud-apple" "$HOME/.aloud/aloud-apple"
+
 echo "==> launching"
 open "$dest"
 

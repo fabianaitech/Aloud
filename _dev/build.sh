@@ -14,6 +14,7 @@ bundle="dist/${app_name}.app"
 
 echo "==> swift build -c release"
 swift build -c release --product "$exec_name"
+swift build -c release --product aloud-apple
 
 bin_path="$(swift build -c release --product "$exec_name" --show-bin-path)/${exec_name}"
 if [ ! -x "$bin_path" ]; then
@@ -26,6 +27,9 @@ rm -rf "$bundle"
 mkdir -p "${bundle}/Contents/MacOS" "${bundle}/Contents/Resources"
 
 cp "$bin_path" "${bundle}/Contents/MacOS/${exec_name}"
+# The Apple engine's helper rides along in the bundle; install.sh copies it into
+# ~/.aloud, where the daemon looks first.
+cp "$(dirname "$bin_path")/aloud-apple" "${bundle}/Contents/MacOS/aloud-apple"
 cp "$here/Info.plist" "${bundle}/Contents/Info.plist"
 # Ensure the executable name in the plist matches the copied binary.
 /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable ${exec_name}" "${bundle}/Contents/Info.plist" >/dev/null

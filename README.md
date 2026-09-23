@@ -12,17 +12,27 @@ on your own machine, there is no API key and no cost.
 
 | | **Apple** (default) | **Kokoro** |
 |---|---|---|
-| Quality | Compact voices are dated; Premium/Enhanced are good | Better |
-| Resident memory | none | ~1.26 GB warm, ~24 MB idle |
-| First audio | ~1s | ~6s cold, ~0.7s warm |
+| Quality | Compact voices are dated; Premium/Enhanced/Siri are good | Better |
+| Resident memory | ~48 MB helper while in use | ~1.26 GB warm, ~24 MB idle |
+| First audio | ~0.1s (Siri ~0.5s) | ~6s cold, ~0.7s warm |
 | Setup | none — built into macOS | one script, ~330 MB model |
 
-**Apple** drives macOS's own speech synthesis through `say`. It costs nothing at
-rest: `say` is a short-lived child process and the work happens in an OS-owned
-XPC service.
+**Apple** drives macOS's own speech synthesis through `aloud-apple`, a small
+helper built with the app. It reaches the **Siri voices**, which `say` can't
+see, and it stays warm: every `say` pays ~0.8s to reach the speech service
+before it synthesizes a word, once per sentence, where the helper pays it once.
+Like the Kokoro worker it is killed after ten idle minutes. Without the app
+(`install.sh --no-app`) the engine falls back to `say`: no Siri voices, slower
+per sentence, same everything else.
+
+The Siri voices come from a private AVFoundation list, since Apple doesn't
+publish them to other apps. If a future macOS removes that list, the menu shows
+no Siri voices; nothing else breaks. Only the Siri voices you have downloaded
+appear. Pick one under System Settings → Siri → Voice, or as the system voice in
+Spoken Content, to get it downloaded.
 
 > macOS ships only the *compact* voices, which sound dated. The good ones —
-> Premium and Enhanced — are a free manual download under **System Settings →
+> Premium, Enhanced and Siri — are a free manual download under **System Settings →
 > Accessibility → Spoken Content → System Voice → Manage Voices**. The Voice
 > menu has a **Get More Voices…** shortcut. Judge Apple's quality only after
 > grabbing one.
@@ -105,9 +115,9 @@ CLI (aloud) ────┘                 ~24 MB, always up
                                        │
                           ┌────────────┴────────────┐
                           ▼                         ▼
-                     `say` (Apple)            synth.py (Kokoro)
-                     nothing resident         ~1.26 GB, on demand,
-                                              killed after 10 min idle
+                   aloud-apple (Apple)        synth.py (Kokoro)
+                   ~48 MB, on demand,         ~1.26 GB, on demand,
+                   killed after 10 min idle   killed after 10 min idle
 ```
 
 `server.py` is the supervisor: the HTTP API on `127.0.0.1`, the playback queue,
@@ -149,6 +159,7 @@ aloud clipboard                # speak the clipboard
 aloud status                   # what the engine is doing
 aloud engine apple             # or: kokoro
 aloud voice "Zoe (Enhanced)"   # Apple
+aloud voice "Siri Voice 2"     # Apple — a Siri voice
 aloud voice bf_emma            # Kokoro — British; switches language too
 aloud voices                   # grouped by language (Kokoro) or tier (Apple)
 aloud 1.25                     # speed
