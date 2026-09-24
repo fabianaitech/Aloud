@@ -44,7 +44,7 @@ Aloud is installed:
 Next steps:
   * Enable "Launch at Login" from the menubar menu.
   * Apple's engine works right away. For Kokoro's better voices, run
-    `aloud setup` once (builds the venv, downloads the model).
+    \`aloud setup\` once (builds the venv, downloads the model).
   * Give "Speak with Aloud" a keyboard shortcut: System Settings → Keyboard →
     Keyboard Shortcuts → Services (the menu's "Selection Shortcut…" opens it).
 EOF
