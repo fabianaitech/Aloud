@@ -99,6 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// otherwise never appear, and never time out if the start failed.
     private func beginStartRequest() {
         startRequestedUntil = Date().addingTimeInterval(120)
+        speech.pollFast(for: 10)
         renderTimer?.invalidate()
         let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -519,6 +520,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func setEngine(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         speech.control("engine", id)
+        speech.pollFast(for: 3)
         speech.refreshVoices()
     }
 
