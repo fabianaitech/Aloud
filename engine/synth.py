@@ -34,18 +34,41 @@ os.dup2(2, 1)
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
 import torch  # noqa: E402
-from kokoro import KPipeline  # noqa: E402
+from huggingface_hub import try_to_load_from_cache  # noqa: E402
+from kokoro import KModel, KPipeline  # noqa: E402
 
 LANG = os.environ.get("KOKORO_LANG", "a")
 SR = 24000
+REPO = "hexgrad/Kokoro-82M"
+
+
+def cached(filename):
+    """The local path of a file already in the Hugging Face cache, or None.
+
+    Handed to kokoro instead of a name, because given a name it asks the Hub
+    whether the file changed on every load — config, model and voice, three
+    requests, each allowed 10s. On a flaky network (just woken, VPN, captive
+    Wi-Fi) that turned a ~5s start into 35-90s even with everything on disk.
+    None falls back to kokoro's own download, so first use still works."""
+    path = try_to_load_from_cache(REPO, filename)
+    return path if isinstance(path, str) else None
+
+
+def voice_ref(voice):
+    """A voice as kokoro should load it: the cached .pt file when we have it,
+    the bare name (which downloads it) when we don't."""
+    return cached(f"voices/{voice}.pt") or voice
+
 
 device = "mps" if torch.backends.mps.is_available() else "cpu"
 print(f"[kokoro-synth] loading model on {device} ...", file=sys.stderr, flush=True)
-pipe = KPipeline(lang_code=LANG, device=device)
+model = KModel(repo_id=REPO, config=cached("config.json"),
+               model=cached(KModel.MODEL_NAMES[REPO])).to(device).eval()
+pipe = KPipeline(lang_code=LANG, repo_id=REPO, model=model)
 
 # Warm the MPS kernels so the first real sentence isn't paying for shader
 # compilation on top of everything else.
-for _ in pipe("Ready.", voice=os.environ.get("KOKORO_VOICE", "af_heart"), speed=1.0):
+for _ in pipe("Ready.", voice=voice_ref(os.environ.get("KOKORO_VOICE", "af_heart")), speed=1.0):
     pass
 
 
@@ -54,7 +77,7 @@ def reply(obj):
 
 
 def synth(text, speed, voice):
-    chunks = [a for _, _, a in pipe(text, voice=voice, speed=speed)]
+    chunks = [a for _, _, a in pipe(text, voice=voice_ref(voice), speed=speed)]
     if not chunks:
         return np.zeros(1, dtype=np.float32)
     return np.concatenate(chunks)

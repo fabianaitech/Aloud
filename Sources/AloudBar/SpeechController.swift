@@ -77,6 +77,34 @@ final class SpeechController {
         timer = nil
     }
 
+    /// Poll every 0.25s until `seconds` from now. While an engine is starting or
+    /// a model is loading, the 1.5s tick alone would leave the spinner up for as
+    /// much as 1.5s after the engine was already ready — both engines start in
+    /// well under that, so the tick was most of what you waited for.
+    func pollFast(for seconds: TimeInterval) {
+        let until = Date().addingTimeInterval(seconds)
+        if let current = fastUntil, current > until { return }
+        fastUntil = until
+        guard !fastTicking else { return }
+        fastTicking = true
+        fastTick()
+    }
+
+    private var fastUntil: Date?
+    private var fastTicking = false
+
+    private func fastTick() {
+        guard let until = fastUntil, until > Date() else {
+            fastTicking = false
+            fastUntil = nil
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.refresh()
+            self?.fastTick()
+        }
+    }
+
     /// Run control.sh with arguments: on/off/pause/resume/stop/skip/faster/slower/
     /// reset/start/restart/clipboard, "voice <name>", or a numeric speed like "1.25".
     /// Fire-and-forget, then refresh.
@@ -125,6 +153,8 @@ final class SpeechController {
             let status = data.flatMap { try? JSONDecoder().decode(SpeechStatus.self, from: $0) }
             let up = status != nil
             DispatchQueue.main.async {
+                // Keep polling quickly for as long as a model is coming up.
+                if status?.loading == true { self.pollFast(for: 1) }
                 guard up != self.lastUp || status != self.last else { return }
                 self.lastUp = up
                 self.last = status
