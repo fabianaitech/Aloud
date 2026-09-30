@@ -1,0 +1,16 @@
+// Signing.xcconfig — who signs the iPhone app. Deliberately empty here: the
+// repo is public, and a team belongs to whoever builds it.
+//
+// Create ios/Local.xcconfig (git-ignored) with your own values:
+//
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   ALOUD_BUNDLE_ID = com.yourname.Aloud
+//
+// Your team id: Xcode → Settings → Accounts, or developer.apple.com → Membership.
+// A bundle id must be unique to your team; a free Personal Team can't reuse
+// one somebody else registered.
+
+DEVELOPMENT_TEAM =
+ALOUD_BUNDLE_ID = com.example.Aloud
+
+#include? "Local.xcconfig"

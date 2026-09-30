@@ -800,6 +800,14 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def _refused(self):
+        """Loopback isn't only us: a web page can reach it too. See
+        remote.request_allowed — no browser Origin, and addressed to localhost."""
+        if remote.request_allowed(self.headers):
+            return False
+        self._json(403, {"error": "forbidden"})
+        return True
+
     def _json(self, code, obj):
         b = json.dumps(obj).encode()
         self.send_response(code)
@@ -816,6 +824,8 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self):
+        if self._refused():
+            return
         if self.path.startswith("/health"):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
@@ -834,6 +844,8 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
+        if self._refused():
+            return
         global _default_speed
         p = self.path
         if p.startswith("/say"):

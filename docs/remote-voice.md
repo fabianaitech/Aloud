@@ -134,10 +134,17 @@ The menu shows *Reachable at https://…* once Serve points at Aloud.
 
 ### 3. The iPhone app (Xcode, no App Store)
 
-1. Open `ios/Aloud.xcodeproj` in Xcode.
-2. Target **Aloud** → Signing & Capabilities → Team: **Fabian Afatsawo
-   (Personal Team)**, already set. Change the bundle id if Xcode says it's
-   taken.
+1. Create `ios/Local.xcconfig` (git-ignored) with your team and a bundle id
+   of your own:
+
+   ```
+   DEVELOPMENT_TEAM = ABCDE12345
+   ALOUD_BUNDLE_ID = com.yourname.Aloud
+   ```
+
+   Find your team id in Xcode → Settings → Accounts. A free Personal Team
+   works. `ios/Signing.xcconfig` explains the fields.
+2. Open `ios/Aloud.xcodeproj` in Xcode.
 3. Connect the iPhone by cable, or over Wi-Fi once paired. Choose it as the run
    destination and press Run.
 4. On the phone, the first time:
