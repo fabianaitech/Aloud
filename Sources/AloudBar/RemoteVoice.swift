@@ -147,12 +147,19 @@ extension AppDelegate {
         let tsItem = NSMenuItem(title: tsLine, action: nil, keyEquivalent: "")
         tsItem.isEnabled = false
         sub.addItem(tsItem)
-        let copy = NSMenuItem(title: "Copy Tailscale Serve Command", action: #selector(copyServeCommand),
-                              keyEquivalent: "")
-        copy.target = self
-        copy.toolTip = s?.tailscale.serve_command
-        copy.isEnabled = s != nil
-        sub.addItem(copy)
+        // Share on the tailnet — or stop — without a terminal. Tailscale keeps
+        // the setting, so this is normally a one-time click per Mac.
+        if ts?.running == true {
+            let shared = ts?.serve_url != nil
+            let serve = NSMenuItem(title: shared ? "Stop Sharing on Tailnet" : "Share on Tailnet",
+                                   action: #selector(toggleServe), keyEquivalent: "")
+            serve.target = self
+            serve.representedObject = !shared
+            serve.toolTip = shared
+                ? "Stop Tailscale Serve for Aloud. The iPhone can't reach the Mac until it's shared again."
+                : "Make Aloud reachable from your own devices on your tailnet (Tailscale Serve, HTTPS). Not public."
+            sub.addItem(serve)
+        }
 
         sub.addItem(.separator())
         let pairItem = NSMenuItem(title: "Pair iPhone…", action: #selector(pairIPhone), keyEquivalent: "")
@@ -196,10 +203,23 @@ extension AppDelegate {
         remote.post("config", ["destination": id])
     }
 
-    @objc func copyServeCommand() {
-        guard let cmd = remote.status?.tailscale.serve_command else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(cmd, forType: .string)
+    @objc func toggleServe(_ sender: NSMenuItem) {
+        let on = sender.representedObject as? Bool ?? true
+        remote.post("serve", ["on": on]) { [weak self] obj in
+            if let link = obj?["consent_url"] as? String, let url = URL(string: link) {
+                // First time on this tailnet: Tailscale wants a yes in the browser,
+                // and finishes by itself once it has one.
+                NSWorkspace.shared.open(url)
+            } else if obj?["ok"] as? Bool == false {
+                let alert = NSAlert()
+                alert.messageText = on ? "Couldn't share on your tailnet" : "Couldn't stop sharing"
+                alert.informativeText = (obj?["error"] as? String) ?? "Tailscale didn't say why."
+                NSApp.activate(ignoringOtherApps: true)
+                alert.runModal()
+            }
+            // Tailscale may still be applying it; look again shortly.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self?.remote.refresh() }
+        }
     }
 
     @objc func removeDevice(_ sender: NSMenuItem) {
@@ -220,8 +240,8 @@ extension AppDelegate {
             if let url {
                 text += "Server:  \(url)\n"
             } else {
-                text += "Server:  (set up Tailscale Serve first — use "
-                    + "“Copy Tailscale Serve Command” and run it in Terminal)\n"
+                text += "Server:  (share Aloud on your tailnet first: "
+                    + "Remote Voice → Share on Tailnet)\n"
             }
             text += "Code:  \(spaced)\n\nThe code works once, for the next five minutes."
             alert.informativeText = text
