@@ -172,7 +172,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "AloudRemote-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Aloud Remote";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Aloud Remote records your spoken reply so your Mac can transcribe it and send it to Claude.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Aloud Remote records your spoken reply so it can be transcribed and sent to Claude.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Aloud Remote turns your spoken reply into text on this iPhone, so you can check it before sending.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
@@ -201,7 +202,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "AloudRemote-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Aloud Remote";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Aloud Remote records your spoken reply so your Mac can transcribe it and send it to Claude.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Aloud Remote records your spoken reply so it can be transcribed and sent to Claude.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Aloud Remote turns your spoken reply into text on this iPhone, so you can check it before sending.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;

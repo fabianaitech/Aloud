@@ -449,29 +449,46 @@ def publish_response(text, speed, session_id=None, event_id=None, cwd=None):
                      daemon=True).start()
 
 
+def _aac(wav, out):
+    subprocess.run(["afconvert", "-f", "m4af", "-d", "aac", "-b", "64000", wav, out],
+                   check=True, capture_output=True, timeout=120)
+    os.chmod(out, 0o600)
+
+
+def _duration(wav):
+    with wave.open(wav) as w:
+        return w.getnframes() / float(w.getframerate())
+
+
 def _make_clip(event_id, session_id, text, speed):
-    """Synthesize with the engine you use on the Mac, then one AAC file: a
-    minute of speech is ~0.5MB instead of 2.6MB of WAV over the tailnet."""
+    """Synthesize with the engine you use on the Mac, one sentence-sized chunk
+    at a time, and hand each to the phone as soon as it exists (`clip_part`):
+    playback starts after the first sentence, not after the whole response.
+    Then one AAC file of the lot (`clip`), for replay. AAC because a minute of
+    speech is ~0.5MB instead of 2.6MB of WAV over the tailnet."""
     with _clip_lock:
         parts = []
-        try:
+        segments = []          # what each part says, and for how long: the phone
+        try:                   # highlights the sentence being spoken
             for i, chunk in enumerate(_chunk(text)):
                 p = os.path.join(CLIPS_DIR, f".{event_id}-{i}.wav")
                 _synth(chunk, speed, p)
                 parts.append(p)
+                name = f"{event_id}-p{i}.m4a"
+                _aac(p, os.path.join(CLIPS_DIR, name))
+                seg = {"text": chunk, "duration": round(_duration(p), 3)}
+                segments.append(seg)
+                events.append({"type": "clip_part", "event_id": event_id, "session_id": session_id,
+                               "index": i, "clip": name, **seg})
             if not parts:
                 raise RuntimeError("nothing to speak")
             wav = os.path.join(CLIPS_DIR, f".{event_id}.wav")
             _concat(parts, wav)
-            out = os.path.join(CLIPS_DIR, f"{event_id}.m4a")
-            subprocess.run(["afconvert", "-f", "m4af", "-d", "aac", "-b", "64000", wav, out],
-                           check=True, capture_output=True, timeout=120)
-            os.chmod(out, 0o600)
             parts.append(wav)
-            with wave.open(wav) as w:
-                duration = w.getnframes() / float(w.getframerate())
+            _aac(wav, os.path.join(CLIPS_DIR, f"{event_id}.m4a"))
             events.append({"type": "clip", "event_id": event_id, "session_id": session_id,
-                           "clip": f"{event_id}.m4a", "duration": round(duration, 2)})
+                           "clip": f"{event_id}.m4a", "duration": round(_duration(wav), 2),
+                           "parts": len(parts) - 1, "segments": segments})
         except Exception as e:  # noqa: BLE001 — the text already arrived; say the audio failed
             log(f"clip {event_id} failed: {e}")
             events.append({"type": "clip", "event_id": event_id, "session_id": session_id,
@@ -498,12 +515,29 @@ def _concat(parts, out):
 
 
 def _prune_clips():
+    """Keep the last KEEP_CLIPS full clips. Per-sentence parts only matter
+    while a response is being heard, so they go after an hour."""
     try:
-        clips = sorted((os.path.join(CLIPS_DIR, n) for n in os.listdir(CLIPS_DIR)
-                        if n.endswith(".m4a")), key=os.path.getmtime)
+        names = os.listdir(CLIPS_DIR)
     except OSError:
         return
-    for p in clips[:-KEEP_CLIPS]:
+    now = _now()
+    full, stale = [], []
+    for n in names:
+        if not n.endswith(".m4a"):
+            continue
+        p = os.path.join(CLIPS_DIR, n)
+        try:
+            mtime = os.path.getmtime(p)
+        except OSError:
+            continue
+        if re.search(r"-p\d+\.m4a$", n):
+            if now - mtime > 3600:
+                stale.append(p)
+        else:
+            full.append((mtime, p))
+    full.sort()
+    for p in stale + [p for _, p in full[:-KEEP_CLIPS]]:
         try:
             os.remove(p)
         except OSError:

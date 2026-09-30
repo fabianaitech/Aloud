@@ -204,6 +204,112 @@ struct StateBadge: View {
     }
 }
 
+/// The response, with the sentence being spoken highlighted.
+///
+/// The Mac says which text each audio part holds and how long it lasts, so the
+/// part is exact; within a part, the sentence is placed by its share of the
+/// characters — close enough to follow along, which is all this is for.
+struct SpokenText: View {
+    let response: ResponseItem
+    @EnvironmentObject var player: Player
+
+    var body: some View {
+        if response.segments.isEmpty {
+            ScrollView {
+                Text(response.text).frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .frame(maxHeight: 220)
+        } else {
+            let now = active
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(response.segments.enumerated()), id: \.offset) { i, seg in
+                            Text(Self.attributed(Self.sentences(seg.text), highlight: now?.segment == i ? now?.sentence : nil))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id(i)
+                        }
+                        if let rest = remainder {
+                            Text(rest).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .textSelection(.enabled)
+                }
+                .frame(maxHeight: 220)
+                .onChange(of: now?.segment) { _, seg in
+                    if let seg { withAnimation { proxy.scrollTo(seg, anchor: .center) } }
+                }
+            }
+        }
+    }
+
+    /// Text not yet synthesized while parts are still arriving.
+    private var remainder: String? {
+        guard response.clip == nil, response.clipError == nil else { return nil }
+        let said = Self.collapse(response.segments.map(\.text).joined(separator: " "))
+        let all = Self.collapse(response.text)
+        guard all.hasPrefix(said), all.count > said.count else { return nil }
+        return String(all.dropFirst(said.count)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// (segment, sentence) being spoken now, if this response is playing.
+    private var active: (segment: Int, sentence: Int)? {
+        guard player.currentID == response.id else { return nil }
+        let segs = response.segments
+        var seg = 0
+        var t = player.position
+        if let part = player.currentPart {
+            seg = part
+        } else {
+            // A whole-response clip: find the part by adding up durations.
+            for (i, s) in segs.enumerated() {
+                seg = i
+                if t < s.duration { break }
+                t -= s.duration
+            }
+        }
+        guard seg < segs.count else { return nil }
+        let sents = Self.sentences(segs[seg].text)
+        let total = Double(max(1, sents.reduce(0) { $0 + $1.count }))
+        var end = 0.0
+        for (j, s) in sents.enumerated() {
+            end += Double(s.count) / total * segs[seg].duration
+            if t < end { return (seg, j) }
+        }
+        return (seg, max(0, sents.count - 1))
+    }
+
+    static func attributed(_ sentences: [String], highlight: Int?) -> AttributedString {
+        var out = AttributedString()
+        for (j, s) in sentences.enumerated() {
+            var a = AttributedString(j < sentences.count - 1 ? s + " " : s)
+            if j == highlight {
+                a.backgroundColor = Color.accentColor.opacity(0.22)
+                a.foregroundColor = .primary
+            }
+            out += a
+        }
+        return out
+    }
+
+    /// The same sentence split the Mac uses to chunk speech.
+    static func sentences(_ text: String) -> [String] {
+        let t = collapse(text)
+        guard let re = try? NSRegularExpression(pattern: #".*?[.!?](?:\s|$)|.+$"#) else { return [t] }
+        let ns = t as NSString
+        let out = re.matches(in: t, range: NSRange(location: 0, length: ns.length))
+            .map { ns.substring(with: $0.range).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return out.isEmpty ? [t] : out
+    }
+
+    static func collapse(_ s: String) -> String {
+        s.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+}
+
 struct ResponseCard: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var player: Player
@@ -212,11 +318,7 @@ struct ResponseCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Latest response").font(.caption).foregroundStyle(.secondary)
             if let r = model.latestResponse {
-                ScrollView {
-                    Text(r.text).frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .frame(maxHeight: 220)
+                SpokenText(response: r)
                 HStack(spacing: 20) {
                     if player.currentID == r.id {
                         Button {
@@ -316,6 +418,12 @@ struct ReplyComposer: View {
                     Spacer()
                     ProgressView(value: Double(recorder.level)).frame(width: 90)
                 }
+                if !model.liveText.isEmpty {
+                    Text(model.liveText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .foregroundStyle(.secondary)
+                        .animation(.default, value: model.liveText)
+                }
                 HStack {
                     Button("Cancel", role: .cancel) { model.cancelReply() }
                         .buttonStyle(.bordered)
@@ -328,9 +436,12 @@ struct ReplyComposer: View {
                 }
             }
         case .transcribing:
-            HStack { ProgressView(); Text("Transcribing on your Mac…") }
+            HStack { ProgressView(); Text("Transcribing…") }
         case .editing, .sending:
             VStack(alignment: .leading, spacing: 10) {
+                if let on = model.transcribedOn {
+                    Text("Transcribed on \(on)").font(.caption2).foregroundStyle(.secondary)
+                }
                 TextEditor(text: $model.transcript)
                     .frame(minHeight: 90, maxHeight: 200)
                     .padding(6)
@@ -457,10 +568,13 @@ struct SettingsView: View {
                     Picker("Language", selection: $model.replyLanguage) {
                         ForEach(languages, id: \.0) { Text($0.1).tag($0.0) }
                     }
+                    .onChange(of: model.replyLanguage) { _, _ in model.prepareTranscription() }
+                    Toggle("Transcribe on iPhone", isOn: $model.transcribeOnPhone)
+                        .onChange(of: model.transcribeOnPhone) { _, _ in model.prepareTranscription() }
                 } header: {
                     Text("Replies")
                 } footer: {
-                    Text("Transcribed on your Mac, on-device.")
+                    Text("On-device either way. On the iPhone you see the words while you speak (iOS 26 or later). The first time for a language, iOS downloads its speech model — a system download, not part of this app — and until it's there the Mac transcribes instead.")
                 }
                 Section {
                     Button("Unpair This iPhone", role: .destructive) { confirmUnpair = true }

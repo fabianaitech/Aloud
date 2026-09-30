@@ -135,6 +135,10 @@ func synthesize(_ text: String, voice: AVSpeechSynthesisVoice, speed: Double, ou
     let url = URL(fileURLWithPath: out)
 
     synthesizer.write(u) { buffer in
+        // Siri voices can deliver a stray buffer after the end marker. Taking it
+        // would re-create the file — already closed and handed on — and
+        // overwrite the finished sentence with a few milliseconds of audio.
+        if done { return }
         guard let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 else {
             done = true
             return
