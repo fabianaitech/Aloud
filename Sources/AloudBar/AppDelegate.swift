@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let speech = SpeechController()
     /// Remote Voice status and switches; lazily, because it needs the port.
     lazy var remote = RemoteVoiceController(port: speech.port)
+    /// The menu while it's open, so a status change can redraw it in place.
+    private weak var openMenu: NSMenu?
 
     /// Last polled daemon state; nil means the engine isn't running.
     private var status: SpeechStatus?
@@ -88,6 +90,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.render()
         }
         speech.start()
+
+        // Remote Voice's status (is the phone connected?) goes stale fast: keep
+        // it fresh, and redraw an open menu when it changes, rather than show
+        // what was true when the menu was last opened.
+        remote.onChange = { [weak self] in
+            guard let self, let menu = self.openMenu else { return }
+            self.menuNeedsUpdate(menu)
+        }
+        let rv = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+            guard let self, self.daemonUp else { return }
+            self.remote.refresh()
+        }
+        RunLoop.main.add(rv, forMode: .common)
         speech.refreshVoices()
     }
 
@@ -190,9 +205,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Menu
 
     func menuWillOpen(_ menu: NSMenu) {
-        // Built from the last status; this refresh is for the next open, since
-        // Remote Voice's status asks Tailscale and shouldn't hold the menu up.
+        openMenu = menu
         remote.refresh()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        openMenu = nil
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {

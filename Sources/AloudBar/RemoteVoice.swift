@@ -8,14 +8,22 @@
 import AppKit
 import Foundation
 
-struct RemoteStatus: Decodable {
-    struct Device: Decodable {
+struct RemoteStatus: Decodable, Equatable {
+    /// What the menu displays — minus timestamps that change on every poll.
+    var shown: String {
+        let d = devices.map { "\($0.id):\($0.name):\($0.connected)" }.joined(separator: ",")
+        let ss = sessions.map { "\($0.session_id):\($0.can_reply)" }.joined(separator: ",")
+        return "\(enabled)|\(destination)|\(listening)|\(d)|\(ss)|\(tailscale.running)|"
+            + "\(tailscale.serve_url ?? "")|\(pairing?.code ?? "")"
+    }
+
+    struct Device: Decodable, Equatable {
         let id: String
         let name: String
         let connected: Bool
         let last_seen: Double?
     }
-    struct Session: Decodable {
+    struct Session: Decodable, Equatable {
         let session_id: String
         let project: String
         let title: String?
@@ -23,14 +31,14 @@ struct RemoteStatus: Decodable {
         let state: String
         let can_reply: Bool
     }
-    struct Tailscale: Decodable {
+    struct Tailscale: Decodable, Equatable {
         let installed: Bool
         let running: Bool
         let dns_name: String?
         let serve_url: String?
         let serve_command: String
     }
-    struct Pairing: Decodable {
+    struct Pairing: Decodable, Equatable {
         let code: String
         let expires_in: Int
     }
@@ -64,8 +72,12 @@ final class RemoteVoiceController {
         session.dataTask(with: base.appendingPathComponent("rv/status")) { [weak self] data, _, _ in
             let s = data.flatMap { try? JSONDecoder().decode(RemoteStatus.self, from: $0) }
             DispatchQueue.main.async {
-                self?.status = s
-                self?.onChange()
+                guard let self else { return }
+                // A device's last-seen time changes every poll; only what the
+                // menu shows counts as a change worth redrawing for.
+                let changed = self.status?.shown != s?.shown
+                self.status = s
+                if changed { self.onChange() }
             }
         }.resume()
     }
