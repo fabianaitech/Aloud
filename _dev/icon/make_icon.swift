@@ -4,6 +4,8 @@
 //   AppIcon-1024.png                       (master, the wired concept)
 //   AppIcon.iconset/*.png + AppIcon.icns   (wired into build.sh)
 //   alt-*-1024.png                         (colour alternates, for review only)
+//   ../../ios/AloudRemote/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+//                                          (the iPhone app: full bleed, opaque)
 //
 // Drawn rather than downloaded: an icon found online is someone's copyright, and
 // shipping it inside an .app is a licensing problem. Code also stays crisp at
@@ -37,18 +39,26 @@ let primary = Concept(name: "primary", top: 0x6366F1, bottom: 0x4F46E5)
 let altTeal = Concept(name: "teal",    top: 0x2DD4BF, bottom: 0x0D9488)
 let altCoral = Concept(name: "coral",  top: 0xDE8163, bottom: 0xD06E4E)  // Claude coral family
 
-func tilePath() -> CGPath {
+/// macOS draws the tile itself: a rounded square inside a transparent margin.
+/// iOS wants the opposite — an opaque square to the edge, which the system
+/// masks. Transparency there turns black, which is the border to avoid.
+func tilePath(fullBleed: Bool = false) -> CGPath {
+    if fullBleed { return CGPath(rect: CGRect(x: 0, y: 0, width: CANVAS, height: CANVAS), transform: nil) }
     let inset: CGFloat = 100
     let rect = CGRect(x: inset, y: inset, width: CANVAS - 2 * inset, height: CANVAS - 2 * inset)
     return CGPath(roundedRect: rect, cornerWidth: 184, cornerHeight: 184, transform: nil)
 }
 
-func drawTile(_ ctx: CGContext, _ c: Concept) {
-    let path = tilePath()
+func drawTile(_ ctx: CGContext, _ c: Concept, fullBleed: Bool = false) {
+    let path = tilePath(fullBleed: fullBleed)
     // Soft drop shadow so a mid-tone tile still separates from a white Finder bg.
+    // (Not on iOS: there is nothing outside the tile for it to fall on.)
     ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 30,
-                  color: CGColor(gray: 0, alpha: 0.22))
+    if fullBleed { ctx.setShadow(offset: .zero, blur: 0, color: nil) }
+    if !fullBleed {
+        ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 30,
+                      color: CGColor(gray: 0, alpha: 0.22))
+    }
     ctx.addPath(path)
     ctx.setFillColor(rgb(c.top))
     ctx.fillPath()
@@ -71,7 +81,8 @@ func drawTile(_ ctx: CGContext, _ c: Concept) {
                                     CGColor(gray: 1, alpha: 0.0)] as CFArray,
                            locations: [0, 1])!
     ctx.drawLinearGradient(gloss,
-                           start: CGPoint(x: 0, y: CANVAS - 100),
+                           // From the tile's top edge: 100 in on macOS, the canvas edge on iOS.
+                           start: CGPoint(x: 0, y: fullBleed ? CANVAS : CANVAS - 100),
                            end: CGPoint(x: 0, y: CANVAS * 0.55),
                            options: [])
     ctx.restoreGState()
@@ -103,14 +114,15 @@ func drawWaveform(_ ctx: CGContext) {
     ctx.restoreGState()
 }
 
-func render(_ c: Concept, px: Int) -> CGImage {
+func render(_ c: Concept, px: Int, fullBleed: Bool = false) -> CGImage {
+    // iOS rejects an app icon with an alpha channel, so that one is opaque.
+    let alpha = fullBleed ? CGImageAlphaInfo.noneSkipLast : CGImageAlphaInfo.premultipliedLast
     let ctx = CGContext(data: nil, width: px, height: px, bitsPerComponent: 8,
-                        bytesPerRow: 0, space: srgb,
-                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                        bytesPerRow: 0, space: srgb, bitmapInfo: alpha.rawValue)!
     ctx.interpolationQuality = .high
     let s = CGFloat(px) / CANVAS
     ctx.scaleBy(x: s, y: s)      // draw in 1024 units, crisp at any pixel size
-    drawTile(ctx, c)
+    drawTile(ctx, c, fullBleed: fullBleed)
     drawWaveform(ctx)
     return ctx.makeImage()!
 }
@@ -128,6 +140,10 @@ let fm = FileManager.default
 writePNG(render(primary, px: 1024), outDir.appendingPathComponent("AppIcon-1024.png"))
 writePNG(render(altTeal, px: 1024), outDir.appendingPathComponent("alt-teal-1024.png"))
 writePNG(render(altCoral, px: 1024), outDir.appendingPathComponent("alt-coral-1024.png"))
+
+let iosIcon = outDir.appendingPathComponent("../../ios/AloudRemote/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
+    .standardizedFileURL
+writePNG(render(primary, px: 1024, fullBleed: true), iosIcon)
 
 // Full iconset for iconutil.
 let iconset = outDir.appendingPathComponent("AppIcon.iconset")
@@ -156,3 +172,4 @@ print("  \(outDir.appendingPathComponent("AppIcon-1024.png").path)")
 print("  \(outDir.appendingPathComponent("AppIcon.icns").path)  (iconutil exit \(p.terminationStatus))")
 print("  \(outDir.appendingPathComponent("alt-teal-1024.png").path)")
 print("  \(outDir.appendingPathComponent("alt-coral-1024.png").path)")
+print("  \(iosIcon.path)")
