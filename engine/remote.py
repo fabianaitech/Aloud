@@ -854,6 +854,49 @@ def tailscale_status():
     return st
 
 
+def set_serve(on):
+    """Share (or stop sharing) the remote port on the tailnet — the same as
+    running SERVE_CMD, but from the menu. Tailnet only; never Funnel.
+
+    The first time on a tailnet, Tailscale asks for consent in the browser and
+    the command waits until it's given. Its link is returned right away, the
+    command left to finish on its own; the menu shows the result once it has.
+    Tailscale keeps the setting (--bg): across disconnects, restarts, reboots."""
+    port = _cfg["port"]
+    args = (["serve", "--bg", "--https=8443", f"http://127.0.0.1:{port}"] if on
+            else ["serve", "--https=8443", "off"])
+    binary = next((b for b in TAILSCALE if b.startswith("/") and os.access(b, os.X_OK)), "tailscale")
+    try:
+        proc = subprocess.Popen([binary, *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    except OSError as e:
+        return {"ok": False, "error": f"couldn't run Tailscale: {e}"}
+    found = {"url": None}
+    seen = threading.Event()
+    lines = []
+
+    def read():
+        for line in proc.stdout:
+            lines.append(line.rstrip())
+            m = re.search(r"https://login\.tailscale\.com/\S+", line)
+            if m and not found["url"]:
+                found["url"] = m.group(0)
+                seen.set()
+        proc.wait()
+        _ts_cache["at"] = 0.0            # the next status reads the new state
+        seen.set()
+        log(f"tailscale {' '.join(args)} -> exit {proc.returncode}")
+
+    threading.Thread(target=read, daemon=True).start()
+    seen.wait(15)
+    if found["url"]:
+        return {"ok": True, "consent_url": found["url"]}
+    if proc.poll() is None:
+        return {"ok": True, "pending": True}
+    if proc.returncode != 0:
+        return {"ok": False, "error": ("\n".join(lines[-3:]) or "Tailscale refused")[:300]}
+    return {"ok": True}
+
+
 # ---- remote HTTP API ---------------------------------------------------------------
 
 _server = None
@@ -1050,6 +1093,9 @@ def handle_local(method, path, body):
         if not enabled():
             return 409, {"error": "turn Remote Voice on first"}
         return 200, start_pairing()
+    if method == "POST" and path == "/rv/serve":
+        res = set_serve(d.get("on") is not False)
+        return (200 if res.get("ok") else 500), res
     if method == "POST" and path == "/rv/revoke":
         try:
             return 200, {"removed": revoke(d.get("id"), d.get("all") is True)}

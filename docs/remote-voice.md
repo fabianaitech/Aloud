@@ -114,19 +114,19 @@ same tailnet.
 1. Start Tailscale on the Mac. It was stopped when this was built.
 2. Enable **HTTPS certificates** for your tailnet, once: Tailscale admin
    console → DNS → HTTPS Certificates.
-3. Aloud menu → Remote Voice → **Copy Tailscale Serve Command**, and run it in
-   Terminal:
+3. Aloud menu → Remote Voice → **Share on Tailnet**. The first time on a
+   tailnet, Tailscale opens a consent page in your browser; approve it and
+   sharing finishes by itself. This publishes Aloud's remote port to **your
+   tailnet only**, as `https://<your-mac>.<tailnet>.ts.net:8443`. It is the
+   same as running this in Terminal, which also works:
 
    ```bash
    tailscale serve --bg --https=8443 http://127.0.0.1:8878
    ```
 
-   This publishes Aloud's remote port to **your tailnet only**, as
-   `https://<your-mac>.<tailnet>.ts.net:8443`. It survives reboots (`--bg`).
-   Undo with `tailscale serve --https=8443 off`.
-
-   The CLI is inside the app: `/Applications/Tailscale.app/Contents/MacOS/Tailscale`
-   if `tailscale` isn't on your PATH.
+   Tailscale keeps the setting. It survives disconnecting, quitting
+   Tailscale and rebooting, and serves again as soon as Tailscale is back
+   on. **Stop Sharing on Tailnet** in the same menu turns it off.
 4. **Never** use `tailscale funnel` for this, and don't forward the port on
    your router. Funnel would put it on the public internet.
 
