@@ -512,11 +512,16 @@ def _prune_clips():
 
 # ---- replies ---------------------------------------------------------------------
 
-# Says what happened and nothing more. Claude Code already tells the model this
-# arrived over the session's inbox rather than from the keyboard, and it is not
-# Aloud's place to argue otherwise.
-REPLY_PREAMBLE = ("Aloud Remote Voice relayed this spoken reply from the iPhone paired with "
-                  "this Mac (transcribed on-device, so it may contain transcription errors):")
+# Your words first, then one footnote. Without it Claude takes the message for
+# another Claude session's and tries to answer that session with SendMessage
+# (it has no sender address, so it guesses — and may message an unrelated
+# session). A longer explanation of how the reply travelled had the opposite
+# problem: Claude narrated it back. So the footnote says only what Claude needs:
+# who is speaking, that there is nobody to message back, and to just answer.
+# It claims no authority; Claude Code's own framing and permissions still apply.
+REPLY_FOOTNOTE = ("(Spoken on the iPhone paired with this Mac and relayed by Aloud; may "
+                  "contain transcription errors. There is no Claude session to message back: "
+                  "answer here, directly, without commenting on how it arrived.)")
 
 
 class Replies:
@@ -632,7 +637,7 @@ class Replies:
     def _deliver(self, r):
         reg = _registration(r["session_id"]) or {}
         marker = f"[aloud-reply {r['id']}]"
-        body = f"{REPLY_PREAMBLE}\n\n{r['text']}\n\n{marker}"
+        body = f"{r['text']}\n\n{REPLY_FOOTNOTE} {marker}"
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                 s.settimeout(3)
