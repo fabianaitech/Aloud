@@ -27,11 +27,18 @@ cp -R "$src" "$dest"
 # download so Gatekeeper doesn't block this ad-hoc-signed (non-notarized) bundle.
 xattr -dr com.apple.quarantine "$dest" 2>/dev/null || true
 
+# One Aloud on this Mac. The staging copy in dist/ has the same bundle id, and
+# macOS registers every .app it sees: left behind, it shows up in Spotlight and
+# Launchpad beside the real one and can even be the copy that gets launched.
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+  -u "$src" 2>/dev/null || true
+
 # The Apple engine's synthesis helper (Siri voices, no per-sentence start-up).
 # The daemon picks it up on its next Apple request; no restart needed.
 echo "==> installing the Apple engine helper to ~/.aloud"
 mkdir -p "$HOME/.aloud"
 cp "$dest/Contents/MacOS/aloud-apple" "$HOME/.aloud/aloud-apple"
+rm -rf "$src"
 
 echo "==> launching"
 open "$dest"
