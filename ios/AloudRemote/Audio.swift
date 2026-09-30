@@ -12,11 +12,15 @@ import Foundation
 @MainActor
 final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var currentID: String?
+    /// Which sentence part is playing, or nil for a whole-response clip.
+    @Published private(set) var currentPart: Int?
     @Published private(set) var isPlaying = false
     @Published private(set) var progress: Double = 0
+    /// Seconds into what is playing now.
+    @Published private(set) var position: TimeInterval = 0
 
     private var player: AVAudioPlayer?
-    private var queue: [(id: String, data: Data)] = []
+    private var queue: [(id: String, part: Int?, data: Data)] = []
     private var timer: Timer?
 
     private func activate() {
@@ -26,12 +30,12 @@ final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     /// Play after whatever is playing now.
-    func enqueue(id: String, data: Data) {
-        if currentID == nil { play(id: id, data: data) } else { queue.append((id, data)) }
+    func enqueue(id: String, part: Int? = nil, data: Data) {
+        if currentID == nil { play(id: id, part: part, data: data) } else { queue.append((id, part, data)) }
     }
 
     /// Play now, replacing anything playing (replay).
-    func play(id: String, data: Data) {
+    func play(id: String, part: Int? = nil, data: Data) {
         stopTimer()
         activate()
         do {
@@ -41,6 +45,8 @@ final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
             p.play()
             player = p
             currentID = id
+            currentPart = part
+            position = 0
             isPlaying = true
             startTimer()
         } catch {
@@ -68,6 +74,7 @@ final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
         player?.stop()
         player = nil
         currentID = nil
+        currentPart = nil
         isPlaying = false
         progress = 0
         stopTimer()
@@ -80,22 +87,25 @@ final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private func next() {
         player = nil
         progress = 0
+        position = 0
         if queue.isEmpty {
             currentID = nil
+            currentPart = nil
             isPlaying = false
             stopTimer()
         } else {
             let n = queue.removeFirst()
-            play(id: n.id, data: n.data)
+            play(id: n.id, part: n.part, data: n.data)
         }
     }
 
     private func startTimer() {
         stopTimer()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let p = self.player, p.duration > 0 else { return }
                 self.progress = p.currentTime / p.duration
+                self.position = p.currentTime
             }
         }
     }
@@ -112,8 +122,10 @@ final class Recorder: NSObject, ObservableObject {
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var level: Float = 0
 
-    private var recorder: AVAudioRecorder?
+    private let engine = AVAudioEngine()
+    private var file: AVAudioFile?
     private var timer: Timer?
+    private var started: Date?
     private(set) var url: URL?
 
     static var permission: AVAudioApplication.recordPermission {
@@ -124,32 +136,47 @@ final class Recorder: NSObject, ObservableObject {
         await AVAudioApplication.requestRecordPermission()
     }
 
-    func start() throws {
+    /// Record to a file, and pass every buffer to `live` too — the phone's
+    /// transcriber. The file is always written: it's what the Mac transcribes
+    /// when the phone can't.
+    func start(feed live: LiveFeed?) throws {
         let s = AVAudioSession.sharedInstance()
         try s.setCategory(.playAndRecord, mode: .spokenAudio,
                           options: [.defaultToSpeaker, .allowBluetoothHFP])
         try s.setActive(true)
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else { throw RecorderError.couldNotStart }
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("reply-\(UUID().uuidString).m4a")
-        // 16 kHz mono AAC: all speech recognition needs, and small over the tailnet.
-        let r = try AVAudioRecorder(url: url, settings: [
+        let file = try AVAudioFile(forWriting: url, settings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: 16_000,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-        ])
-        r.isMeteringEnabled = true
-        guard r.record() else { throw RecorderError.couldNotStart }
-        recorder = r
+            AVSampleRateKey: format.sampleRate,
+            AVNumberOfChannelsKey: format.channelCount,
+            AVEncoderBitRateKey: 48_000,
+        ], commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+            try? file.write(from: buffer)
+            live?.send(buffer)
+            let level = Recorder.level(of: buffer)
+            DispatchQueue.main.async { self?.level = level }
+        }
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            throw error
+        }
+        self.file = file
         self.url = url
         isRecording = true
+        started = Date()
         elapsed = 0
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, let r = self.recorder else { return }
-                r.updateMeters()
-                self.elapsed = r.currentTime
-                self.level = max(0, min(1, (r.averagePower(forChannel: 0) + 50) / 50))
+                guard let self, let started = self.started else { return }
+                self.elapsed = Date().timeIntervalSince(started)
             }
         }
     }
@@ -158,8 +185,11 @@ final class Recorder: NSObject, ObservableObject {
     func stop() -> URL? {
         timer?.invalidate()
         timer = nil
-        recorder?.stop()
-        recorder = nil
+        if isRecording {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+        }
+        file = nil                  // closes it
         isRecording = false
         level = 0
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [])
@@ -174,6 +204,16 @@ final class Recorder: NSObject, ObservableObject {
     func discard() {
         if let url { try? FileManager.default.removeItem(at: url) }
         url = nil
+    }
+
+    /// 0...1 from the buffer's RMS, for the level meter.
+    nonisolated private static func level(of buffer: AVAudioPCMBuffer) -> Float {
+        guard let ch = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return 0 }
+        var sum: Float = 0
+        for i in 0..<Int(buffer.frameLength) { sum += ch[i] * ch[i] }
+        let rms = (sum / Float(buffer.frameLength)).squareRoot()
+        let db = 20 * log10(max(rms, 0.000_01))
+        return max(0, min(1, (db + 50) / 50))
     }
 
     enum RecorderError: LocalizedError {

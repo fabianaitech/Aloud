@@ -31,6 +31,12 @@ struct RemoteSession: Codable, Identifiable, Hashable {
     }
 }
 
+/// One spoken piece of a response: the phone highlights it while it plays.
+struct Segment: Codable, Equatable {
+    let text: String
+    let duration: Double
+}
+
 struct RemoteEvent: Codable {
     let seq: Int
     let type: String
@@ -45,6 +51,8 @@ struct RemoteEvent: Codable {
     let clip: String?
     let duration: Double?
     let error: String?
+    let index: Int?          // clip_part: which sentence
+    let segments: [Segment]? // clip: what each part says, in order
     // reply
     let reply_id: String?
     let status: String?

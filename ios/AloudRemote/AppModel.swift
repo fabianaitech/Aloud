@@ -20,6 +20,8 @@ struct ResponseItem: Identifiable, Equatable {
     var clip: String?
     var clipError: String?
     var duration: Double?
+    /// The spoken pieces, as they arrive: the text shown and highlighted.
+    var segments: [Segment] = []
 }
 
 struct ReplyItem: Identifiable, Equatable {
@@ -63,10 +65,15 @@ final class AppModel: ObservableObject {
     @Published var compose: Compose = .idle
     @Published var transcript = ""
     @Published var micDenied = false
+    /// What the phone has heard so far, while recording (on-device only).
+    @Published var liveText = ""
+    /// Where the current transcript came from: "iPhone" or "Mac".
+    @Published var transcribedOn: String?
 
     @AppStorage("autoPlay") var autoPlay = true
     @AppStorage("playAllSessions") var playAllSessions = false
     @AppStorage("replyLanguage") var replyLanguage = ""       // "" = the phone's language
+    @AppStorage("transcribeOnPhone") var transcribeOnPhone = true
     @AppStorage("keepScreenOn") var keepScreenOn = false {
         didSet { UIApplication.shared.isIdleTimerDisabled = keepScreenOn }
     }
@@ -80,6 +87,10 @@ final class AppModel: ObservableObject {
     private var draftID: String?                // reply id, fixed per draft
     private var clipCache: [String: Data] = [:]
     private var played: [String]                // event ids already auto-played
+    private var streaming: Set<String> = []     // responses playing sentence by sentence
+    private var partChain: Task<Void, Never>?   // keeps sentence clips in order
+    private var liveFeed: LiveFeed?
+    private var transcriber: AnyObject?         // LiveTranscriber, iOS 26+
 
     private var seq: Int {
         get { defaults.integer(forKey: "seq") }
@@ -140,6 +151,21 @@ final class AppModel: ObservableObject {
     func start() {
         guard api != nil, pollTask == nil else { return }
         pollTask = Task { await pollLoop() }
+        prepareTranscription()
+    }
+
+    var replyLocale: Locale {
+        replyLanguage.isEmpty ? Locale.current : Locale(identifier: replyLanguage)
+    }
+
+    /// Fetch the phone's speech model for the reply language ahead of time, so
+    /// the first reply doesn't have to fall back to the Mac.
+    func prepareTranscription() {
+        guard transcribeOnPhone else { return }
+        if #available(iOS 26, *) {
+            let locale = replyLocale
+            Task { await LiveTranscriber.prepare(locale) }
+        }
     }
 
     func stop() {
@@ -225,11 +251,30 @@ final class AppModel: ObservableObject {
                                           text: e.text ?? "", ts: e.ts ?? Date().timeIntervalSince1970))
             if responses.count > 100 { responses.removeFirst(responses.count - 100) }
             if selectedSessionID == nil { selectedSessionID = e.session_id }
+        case "clip_part":
+            if let id = e.event_id, let i = responses.firstIndex(where: { $0.id == id }),
+               let idx = e.index, idx == responses[i].segments.count, let text = e.text {
+                responses[i].segments.append(Segment(text: text, duration: e.duration ?? 0))
+            }
+            // A sentence, ready before the rest: start playing now. The first
+            // part claims the response, so neither a later "clip" nor a reconnect
+            // plays it again.
+            guard live, autoPlay, compose != .recording, let id = e.event_id, let name = e.clip,
+                  playAllSessions || e.session_id == selectedSessionID else { return }
+            if e.index == 0 {
+                guard !played.contains(id) else { return }
+                markPlayed(id)
+                streaming.insert(id)
+            }
+            guard streaming.contains(id) else { return }
+            enqueuePart(of: id, index: e.index ?? 0, name: name)
         case "clip":
             guard let id = e.event_id, let i = responses.firstIndex(where: { $0.id == id }) else { return }
+            streaming.remove(id)
             responses[i].clip = e.clip
             responses[i].clipError = e.error
             responses[i].duration = e.duration
+            if let segs = e.segments, !segs.isEmpty { responses[i].segments = segs }
             if live, autoPlay, e.clip != nil, !played.contains(id),
                playAllSessions || e.session_id == selectedSessionID {
                 markPlayed(id)
@@ -257,6 +302,19 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: playback
+
+    /// Fetch and queue sentence clips strictly in arrival order, however the
+    /// downloads race.
+    private func enqueuePart(of eventID: String, index: Int, name: String) {
+        let previous = partChain
+        partChain = Task { [weak self] in
+            await previous?.value
+            guard let self, let api = self.api,
+                  let data = try? await api.clip(name) else { return }
+            if self.compose == .recording { return }      // never over your voice
+            self.player.enqueue(id: eventID, part: index, data: data)
+        }
+    }
 
     var selectedSession: RemoteSession? {
         sessions.first { $0.session_id == selectedSessionID }
@@ -302,17 +360,52 @@ final class AppModel: ObservableObject {
         }
         micDenied = false
         player.pause()                 // the microphone must not hear Claude
+        let feed = LiveFeed()
         do {
-            try recorder.start()
+            try recorder.start(feed: transcribeOnPhone ? feed : nil)
             if draftID == nil { draftID = UUID().uuidString }
+            liveText = ""
             compose = .recording
         } catch {
             compose = .failed(error.localizedDescription)
+            return
+        }
+        // The transcriber starts while you already talk; the feed holds the
+        // first words until it's ready.
+        guard transcribeOnPhone else { return }
+        liveFeed = feed
+        if #available(iOS 26, *) {
+            let t = await LiveTranscriber.start(locale: replyLocale) { [weak self] text in
+                self?.liveText = text
+            }
+            if let t, compose == .recording, liveFeed === feed {
+                transcriber = t
+                feed.attach { t.feed($0) }
+            } else {
+                feed.close()               // not on this phone yet: the Mac will do it
+                if let t { await t.cancel() }
+            }
+        } else {
+            feed.close()
         }
     }
 
     func stopRecording() async {
         guard let url = recorder.stop() else { compose = .idle; return }
+        liveFeed?.close()
+        liveFeed = nil
+        if #available(iOS 26, *), let t = transcriber as? LiveTranscriber {
+            transcriber = nil
+            compose = .transcribing
+            if let text = await t.finish(), !text.isEmpty {
+                transcript = transcript.isEmpty ? text : transcript + " " + text
+                transcribedOn = "iPhone"
+                recorder.discard()
+                compose = .editing
+                return
+            }
+            // Nothing came out of it: let the Mac have a go at the recording.
+        }
         await transcribe(url)
     }
 
@@ -325,9 +418,9 @@ final class AppModel: ObservableObject {
         compose = .transcribing
         do {
             let audio = try Data(contentsOf: url)
-            let locale = replyLanguage.isEmpty ? Locale.current.identifier : replyLanguage
-            let text = try await api?.transcribe(audio: audio, locale: locale) ?? ""
+            let text = try await api?.transcribe(audio: audio, locale: replyLocale.identifier) ?? ""
             transcript = transcript.isEmpty ? text : transcript + " " + text
+            transcribedOn = "Mac"
             recorder.discard()
             compose = .editing
         } catch {
@@ -342,6 +435,14 @@ final class AppModel: ObservableObject {
 
     func cancelReply() {
         if recorder.isRecording { recorder.cancel() } else { recorder.discard() }
+        liveFeed?.close()
+        liveFeed = nil
+        if #available(iOS 26, *), let t = transcriber as? LiveTranscriber {
+            Task { await t.cancel() }
+        }
+        transcriber = nil
+        liveText = ""
+        transcribedOn = nil
         transcript = ""
         draftID = nil
         compose = .idle
@@ -365,6 +466,7 @@ final class AppModel: ObservableObject {
                                          status: r.status, detail: r.detail, error: r.error))
             }
             transcript = ""
+            transcribedOn = nil
             draftID = nil
             compose = .idle
         } catch {
