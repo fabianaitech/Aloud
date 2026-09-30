@@ -7,6 +7,8 @@ import Foundation
 
 struct RemoteSession: Codable, Identifiable, Hashable {
     let session_id: String
+    /// Claude Code's own name for it: automatic, or whatever /rename set.
+    let name: String?
     let project: String
     let cwd: String?
     let title: String?
@@ -15,10 +17,23 @@ struct RemoteSession: Codable, Identifiable, Hashable {
     let can_reply: Bool
     var id: String { session_id }
 
+    /// What to call it: its Claude Code name, else its first prompt, else the project.
+    var displayName: String {
+        if let n = name, !n.isEmpty { return n.prefix(1).uppercased() + n.dropFirst() }
+        if let t = title, !t.isEmpty { return t }
+        return project
+    }
+
     /// "aloud — fix the flaky test", so two sessions in one project differ.
-    var label: String {
-        guard let t = title, !t.isEmpty else { return project }
-        return "\(project) — \(t)"
+    var label: String { "\(project) — \(displayName)" }
+
+    var surfaceIcon: String {
+        switch entrypoint {
+        case "cli": return "terminal.fill"
+        case "claude-desktop", "desktop": return "macwindow"
+        case "claude-vscode": return "chevron.left.forwardslash.chevron.right"
+        default: return "sparkle"
+        }
     }
 
     var surface: String {
@@ -46,6 +61,8 @@ struct RemoteEvent: Codable {
     let id: String?
     let project: String?
     let text: String?
+    let markdown: String?
+    let created: Double?
     // clip
     let event_id: String?
     let clip: String?
