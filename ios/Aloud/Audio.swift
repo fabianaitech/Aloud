@@ -21,8 +21,9 @@ final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var currentPart: Int?
     @Published private(set) var isPlaying = false
     @Published private(set) var progress: Double = 0
-    /// Seconds into what is playing now.
+    /// Seconds into what is playing now, and its length.
     @Published private(set) var position: TimeInterval = 0
+    @Published private(set) var duration: TimeInterval = 0
 
     private var player: AVAudioPlayer?
     private var queue: [(id: String, part: Int?, data: Data)] = []
@@ -60,6 +61,9 @@ final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
     /// one that is paused or was cut off: it starts at once, and the stale one's
     /// remaining parts go (it can still be replayed).
     func enqueue(id: String, part: Int? = nil, data: Data) {
+        // The full clip of this response is already playing (a seek or a
+        // replay): its sentence parts have nothing left to add.
+        if part != nil, currentID == id, currentPart == nil { return }
         let audible = player?.isPlaying == true
         if currentID == nil || (!audible && currentID != id) {
             queue.removeAll { $0.id != id }
@@ -70,7 +74,9 @@ final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     /// Play now, replacing anything playing (replay).
-    func play(id: String, part: Int? = nil, data: Data) {
+    func play(id: String, part: Int? = nil, data: Data, from start: TimeInterval = 0) {
+        // The whole clip replaces any of its sentences still waiting.
+        if part == nil { queue.removeAll { $0.id == id } }
         playbackLog.info("play \(id, privacy: .public) part \(part ?? -1)")
         stopTimer()
         activate()
@@ -78,11 +84,13 @@ final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
             let p = try AVAudioPlayer(data: data)
             p.delegate = self
             p.prepareToPlay()
+            if start > 0 { p.currentTime = min(start, max(0, p.duration - 0.05)) }
             p.play()
             player = p
             currentID = id
             currentPart = part
-            position = 0
+            position = p.currentTime
+            duration = p.duration
             isPlaying = true
             startTimer()
         } catch {
@@ -103,6 +111,14 @@ final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
         player.play()
         isPlaying = true
         startTimer()
+    }
+
+    /// Jump within what is playing now.
+    func seek(to t: TimeInterval) {
+        guard let player else { return }
+        player.currentTime = max(0, min(t, player.duration - 0.05))
+        position = player.currentTime
+        progress = player.duration > 0 ? player.currentTime / player.duration : 0
     }
 
     func stop() {

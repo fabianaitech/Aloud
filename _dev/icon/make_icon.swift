@@ -145,6 +145,31 @@ let iosIcon = outDir.appendingPathComponent("../../ios/Aloud/Assets.xcassets/App
     .standardizedFileURL
 writePNG(render(primary, px: 1024, fullBleed: true), iosIcon)
 
+// The iPhone app's accent colours, each with its own home-screen icon
+// (alternate app icons). Same names and colours as Accent in ios/Aloud/Theme.swift.
+let iosAccents: [Concept] = [
+    Concept(name: "blue", top: 0x3B82F6, bottom: 0x2563EB),
+    Concept(name: "teal", top: 0x2DD4BF, bottom: 0x0D9488),
+    Concept(name: "green", top: 0x34D399, bottom: 0x059669),
+    Concept(name: "coral", top: 0xDE8163, bottom: 0xD06E4E),
+    Concept(name: "pink", top: 0xF472B6, bottom: 0xDB2777),
+    Concept(name: "purple", top: 0xA78BFA, bottom: 0x7C3AED),
+    Concept(name: "graphite", top: 0x6B7280, bottom: 0x374151),
+]
+let catalog = outDir.appendingPathComponent("../../ios/Aloud/Assets.xcassets").standardizedFileURL
+for c in iosAccents {
+    let set = catalog.appendingPathComponent("AppIcon-\(c.name).appiconset")
+    try? fm.createDirectory(at: set, withIntermediateDirectories: true)
+    writePNG(render(c, px: 1024, fullBleed: true), set.appendingPathComponent("icon-1024.png"))
+    let json = """
+    {
+      "images" : [ { "filename" : "icon-1024.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" } ],
+      "info" : { "author" : "xcode", "version" : 1 }
+    }
+    """
+    try! json.write(to: set.appendingPathComponent("Contents.json"), atomically: true, encoding: .utf8)
+}
+
 // Full iconset for iconutil.
 let iconset = outDir.appendingPathComponent("AppIcon.iconset")
 try? fm.removeItem(at: iconset)

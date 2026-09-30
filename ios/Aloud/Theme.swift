@@ -2,14 +2,61 @@
 
 import SwiftUI
 
+import UIKit
+
+/// The accent colours on offer, each a gradient with its own home-screen icon
+/// (drawn by _dev/icon/make_icon.swift from the same values).
+enum Accent: String, CaseIterable, Identifiable {
+    case indigo, blue, teal, green, coral, pink, purple, graphite
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+
+    /// Gradient top and bottom, as in the icon.
+    var colors: (top: UInt32, bottom: UInt32) {
+        switch self {
+        case .indigo: return (0x6366F1, 0x4F46E5)
+        case .blue: return (0x3B82F6, 0x2563EB)
+        case .teal: return (0x2DD4BF, 0x0D9488)
+        case .green: return (0x34D399, 0x059669)
+        case .coral: return (0xDE8163, 0xD06E4E)
+        case .pink: return (0xF472B6, 0xDB2777)
+        case .purple: return (0xA78BFA, 0x7C3AED)
+        case .graphite: return (0x6B7280, 0x374151)
+        }
+    }
+
+    /// The alternate icon's name; indigo is the app's own icon.
+    var iconName: String? { self == .indigo ? nil : "AppIcon-\(rawValue)" }
+
+    static var current: Accent {
+        Accent(rawValue: UserDefaults.standard.string(forKey: "accent") ?? "") ?? .indigo
+    }
+}
+
+private func uiColor(_ hex: UInt32) -> UIColor {
+    UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+}
+
 extension Color {
-    /// Aloud's indigo, the app icon's top colour.
-    static let aloud = Color(red: 0x63 / 255, green: 0x66 / 255, blue: 0xF1 / 255)
-    static let aloudDeep = Color(red: 0x4F / 255, green: 0x46 / 255, blue: 0xE5 / 255)
+    /// The accent, for fills: buttons, bubbles, the tile.
+    static var aloud: Color { Color(uiColor: uiColor(Accent.current.colors.top)) }
+    static var aloudDeep: Color { Color(uiColor: uiColor(Accent.current.colors.bottom)) }
+    /// The accent for text on a plain background: the deeper shade in light
+    /// mode, the brighter one in dark, so it stays readable in both.
+    static var aloudText: Color {
+        let c = Accent.current.colors
+        return Color(uiColor: UIColor { t in
+            t.userInterfaceStyle == .dark ? uiColor(c.top) : uiColor(c.bottom)
+        })
+    }
 }
 
 extension LinearGradient {
-    static let aloud = LinearGradient(colors: [.aloud, .aloudDeep], startPoint: .top, endPoint: .bottom)
+    static var aloud: LinearGradient {
+        LinearGradient(colors: [.aloud, .aloudDeep], startPoint: .top, endPoint: .bottom)
+    }
 }
 
 /// Ready / Working / Needs permission, with a dot that breathes while Claude works.

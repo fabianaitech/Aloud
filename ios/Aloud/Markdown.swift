@@ -120,7 +120,7 @@ enum Markdown {
         // Inline `code` gets a soft chip behind it, as it would on the web.
         for run in out.runs where run.inlinePresentationIntent?.contains(.code) == true {
             out[run.range].backgroundColor = Color(.tertiarySystemFill)
-            out[run.range].foregroundColor = Color.aloudDeep
+            out[run.range].foregroundColor = Color.aloudText
         }
         return out
     }
