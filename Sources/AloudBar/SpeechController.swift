@@ -39,7 +39,7 @@ final class SpeechController {
     /// A nil status means the daemon is not reachable (not started yet).
     var onState: (SpeechStatus?) -> Void = { _ in }
 
-    private let port: Int
+    let port: Int
     private let dir: String
     private let controlScript: String
     private var timer: Timer?

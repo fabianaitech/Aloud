@@ -20,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var spinner: NSProgressIndicator?
     private let speech = SpeechController()
+    /// Remote Voice status and switches; lazily, because it needs the port.
+    lazy var remote = RemoteVoiceController(port: speech.port)
 
     /// Last polled daemon state; nil means the engine isn't running.
     private var status: SpeechStatus?
@@ -79,7 +81,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if s != nil { self.startRequestedUntil = nil }
             // Apple's voice list lives in the daemon, so (re)fetch it whenever the
             // daemon appears — including after a restart, when ours is stale.
-            if self.daemonUp && !wasUp { self.speech.refreshVoices() }
+            if self.daemonUp && !wasUp {
+                self.speech.refreshVoices()
+                self.remote.refresh()
+            }
             self.render()
         }
         speech.start()
@@ -184,6 +189,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Menu
 
+    func menuWillOpen(_ menu: NSMenu) {
+        // Built from the last status; this refresh is for the next open, since
+        // Remote Voice's status asks Tailscale and shouldn't hold the menu up.
+        remote.refresh()
+    }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
@@ -236,6 +247,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(engineMenuItem())
         menu.addItem(speedMenuItem())
         menu.addItem(voiceMenuItem())
+        menu.addItem(.separator())
+        menu.addItem(remoteVoiceMenuItem())
 
         menu.addItem(.separator())
         if daemonUp {

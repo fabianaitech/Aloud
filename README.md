@@ -191,6 +191,15 @@ Settings live in `~/.aloud/` as one-line files (`speak.engine`, `speak.speed`,
 `speak.voice.apple`, `speak.voice.kokoro`, `speak.enabled`) so the shell, the
 app and the daemon all read the same source of truth.
 
+## Remote Voice (iPhone)
+
+Hear Claude's responses on your iPhone and answer by voice. The reply is
+transcribed on the Mac and delivered into the Claude Code session it answers.
+The phone reaches the Mac privately over Tailscale Serve, and nothing goes
+through a cloud service. Off by default: Aloud menu → **Remote Voice**. Setup,
+the iPhone app (`ios/`, installed with Xcode) and the current limits are in
+[docs/remote-voice.md](docs/remote-voice.md).
+
 ## Claude Code integration (optional)
 
 Aloud started as a way to have [Claude Code](https://claude.com/claude-code)
