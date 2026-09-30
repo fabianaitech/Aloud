@@ -16,6 +16,13 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    AccentPicker()
+                } header: {
+                    Text("Appearance")
+                } footer: {
+                    Text("Changes the colour in the app and its icon on your Home Screen.")
+                }
                 Section("Mac") {
                     LabeledContent("Name", value: model.macName ?? "—")
                     LabeledContent("Server", value: model.serverText)
@@ -55,6 +62,57 @@ struct SettingsView: View {
             } message: {
                 Text("To stop it working from the Mac side too, remove the device in Aloud's menu.")
             }
+        }
+    }
+}
+
+/// The accent colours as swatches; picking one also switches the app icon.
+struct AccentPicker: View {
+    @AppStorage("accent") private var accent = Accent.indigo.rawValue
+
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 14) {
+            ForEach(Accent.allCases) { a in
+                Button { choose(a) } label: {
+                    VStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(LinearGradient(colors: [swatch(a.colors.top), swatch(a.colors.bottom)],
+                                                 startPoint: .top, endPoint: .bottom))
+                            .frame(width: 46, height: 46)
+                            .overlay { WaveformBars(height: 20) }
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                    .strokeBorder(a.rawValue == accent ? Color.primary.opacity(0.85) : .clear,
+                                                  lineWidth: 2.5)
+                                    .padding(-4)
+                            }
+                        Text(a.title)
+                            .font(.caption2.weight(a.rawValue == accent ? .semibold : .regular))
+                            .foregroundStyle(a.rawValue == accent ? .primary : .secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(a.title)
+                .accessibilityAddTraits(a.rawValue == accent ? .isSelected : [])
+            }
+        }
+        .padding(.vertical, 8)
+        .sensoryFeedback(.selection, trigger: accent)
+    }
+
+    private func swatch(_ hex: UInt32) -> Color {
+        Color(red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255,
+              blue: Double(hex & 0xFF) / 255)
+    }
+
+    private func choose(_ a: Accent) {
+        guard a.rawValue != accent else { return }
+        accent = a.rawValue
+        // iOS confirms an icon change with its own alert; that's not ours to skip.
+        if UIApplication.shared.supportsAlternateIcons {
+            UIApplication.shared.setAlternateIconName(a.iconName)
         }
     }
 }

@@ -390,7 +390,7 @@ final class AppModel: ObservableObject {
         responses.last { $0.sessionID == selectedSessionID }
     }
 
-    func playClip(of r: ResponseItem, queue: Bool = false) async {
+    func playClip(of r: ResponseItem, queue: Bool = false, from start: TimeInterval = 0) async {
         guard let name = r.clip, let api else { return }
         do {
             let data: Data
@@ -400,7 +400,7 @@ final class AppModel: ObservableObject {
                 data = try await api.clip(name)
                 clipCache[name] = data
             }
-            if queue { player.enqueue(id: r.id, data: data) } else { player.play(id: r.id, data: data) }
+            if queue { player.enqueue(id: r.id, data: data) } else { player.play(id: r.id, data: data, from: start) }
         } catch {
             if let i = responses.firstIndex(where: { $0.id == r.id }) {
                 responses[i].clipError = error.localizedDescription

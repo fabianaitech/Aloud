@@ -32,13 +32,19 @@ struct AloudApp: App {
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
+    @AppStorage("accent") private var accent = Accent.indigo.rawValue
 
     var body: some View {
-        if model.connection == .notPaired {
-            PairView()
-        } else {
-            MainView()
+        Group {
+            if model.connection == .notPaired {
+                PairView()
+            } else {
+                MainView()
+            }
         }
+        .tint(.aloud)
+        // The accent is read while drawing; a new one redraws everything.
+        .id(accent)
     }
 }
 
