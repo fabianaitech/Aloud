@@ -21,15 +21,16 @@ it lacks, such as Dutch). No cloud service, no API key.
 
 | | Status |
 |---|---|
-| Responses from a **terminal** Claude Code session play on the iPhone | Tested end to end |
-| Spoken reply → transcript you can edit → delivered into that session | Tested end to end (typed replies through the app; recorded audio via the Mac transcriber) |
+| Responses from a **terminal** Claude Code session play on the iPhone | Verified on an iPhone 16 Pro Max over Tailscale Serve |
+| Spoken reply → transcript you can edit → delivered into that session | Verified on the iPhone: recorded, transcribed on the Mac, delivered in 0.5s |
 | Claude's answer to the reply plays on the phone | Tested |
 | Two sessions kept apart (audio, replies, state) | Tested with two sessions |
 | Reconnect without replaying clips or re-sending replies | Tested (relaunch, daemon restart, same reply id sent twice) |
 | Remote Voice off / Mac unreachable / unpaired → clear state, recovers | Tested in the simulator |
 | Busy session or open permission prompt → reply waits, then delivers | Tested, including a denied prompt |
 | **Claude Desktop** (Code tab) sessions | **Not verified** — see below |
-| Recording with the iPhone microphone, background/locked playback | Needs a real device |
+| Recording with the iPhone microphone | Verified on the iPhone |
+| Background / locked-screen playback | Still to test on the device |
 | Apple Watch | Not built yet — see the plan at the end |
 
 ## How a reply reaches the session
