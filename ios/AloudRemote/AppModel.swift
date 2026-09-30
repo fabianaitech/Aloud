@@ -16,6 +16,7 @@ struct ResponseItem: Identifiable, Equatable {
     let sessionID: String?
     let project: String?
     let text: String
+    let markdown: String?
     let ts: Double
     var clip: String?
     var clipError: String?
@@ -32,6 +33,25 @@ struct ReplyItem: Identifiable, Equatable {
     var status: String          // queued | sent | delivered | failed
     var detail: String?
     var error: String?
+}
+
+enum TimelineItem: Identifiable {
+    case response(ResponseItem)
+    case reply(ReplyItem)
+
+    var id: String {
+        switch self {
+        case .response(let r): return "r-" + r.id
+        case .reply(let p): return "p-" + p.id
+        }
+    }
+
+    var date: Date {
+        switch self {
+        case .response(let r): return Date(timeIntervalSince1970: r.ts)
+        case .reply(let p): return p.created
+        }
+    }
 }
 
 enum Connection: Equatable {
@@ -58,8 +78,13 @@ final class AppModel: ObservableObject {
     @Published var macName: String?
     @Published var sessions: [RemoteSession] = []
     @Published var selectedSessionID: String? {
-        didSet { defaults.set(selectedSessionID, forKey: "selectedSession") }
+        didSet {
+            defaults.set(selectedSessionID, forKey: "selectedSession")
+            if let s = selectedSessionID { unread[s] = nil }
+        }
     }
+    /// New responses per session you aren't looking at.
+    @Published var unread: [String: Int] = [:]
     @Published var responses: [ResponseItem] = []
     @Published var replies: [ReplyItem] = []
     @Published var compose: Compose = .idle
@@ -248,9 +273,11 @@ final class AppModel: ObservableObject {
         case "response":
             guard let id = e.id, !responses.contains(where: { $0.id == id }) else { return }
             responses.append(ResponseItem(id: id, sessionID: e.session_id, project: e.project,
-                                          text: e.text ?? "", ts: e.ts ?? Date().timeIntervalSince1970))
-            if responses.count > 100 { responses.removeFirst(responses.count - 100) }
+                                          text: e.text ?? "", markdown: e.markdown,
+                                          ts: e.ts ?? Date().timeIntervalSince1970))
+            if responses.count > 200 { responses.removeFirst(responses.count - 200) }
             if selectedSessionID == nil { selectedSessionID = e.session_id }
+            if live, let sid = e.session_id, sid != selectedSessionID { unread[sid, default: 0] += 1 }
         case "clip_part":
             if let id = e.event_id, let i = responses.firstIndex(where: { $0.id == id }),
                let idx = e.index, idx == responses[i].segments.count, let text = e.text {
@@ -287,6 +314,12 @@ final class AppModel: ObservableObject {
                 replies[i].status = e.status ?? replies[i].status
                 replies[i].detail = e.detail
                 replies[i].error = e.error
+            } else if let text = e.text, let sid = e.session_id {
+                // A reply sent before this launch (or from another phone): rebuild it.
+                replies.append(ReplyItem(id: id, sessionID: sid, text: text,
+                                         created: Date(timeIntervalSince1970: e.created ?? e.ts ?? 0),
+                                         status: e.status ?? "queued", detail: e.detail, error: e.error))
+                if replies.count > 200 { replies.removeFirst(replies.count - 200) }
             }
         case "session":
             Task { try? await refreshSessions() }
@@ -474,20 +507,28 @@ final class AppModel: ObservableObject {
         }
     }
 
-    var repliesForSelected: [ReplyItem] {
-        replies.filter { $0.sessionID == selectedSessionID }.suffix(5).reversed()
+    /// The selected session's conversation, oldest first.
+    var timeline: [TimelineItem] {
+        let rs = responses.filter { $0.sessionID == selectedSessionID }.map(TimelineItem.response)
+        let ps = replies.filter { $0.sessionID == selectedSessionID }.map(TimelineItem.reply)
+        return (rs + ps).sorted { $0.date < $1.date }.suffix(40)
+    }
+
+    func lastResponse(in sessionID: String) -> ResponseItem? {
+        responses.last { $0.sessionID == sessionID }
     }
 
     #if DEBUG
     /// Simulator testing without tapping: pair from launch arguments, and
     /// optionally send one typed reply once connected. Debug builds only.
-    ///   -rvServer http://127.0.0.1:8898 -rvCode 123456 -rvReply "text"
+    ///   -rvServer http://127.0.0.1:8898 -rvCode 123456 -rvSelect <session id> -rvReply "text"
     func runDebugLaunchArguments() {
         let d = UserDefaults.standard
         Task {
             if let server = d.string(forKey: "rvServer"), let code = d.string(forKey: "rvCode") {
                 try? await pair(server: server, code: code)
             }
+            if let sid = d.string(forKey: "rvSelect") { selectedSessionID = sid }
             if let text = d.string(forKey: "rvReply") {
                 for _ in 0..<40 where connection != .connected || selectedSession == nil {
                     try? await Task.sleep(nanoseconds: 250_000_000)

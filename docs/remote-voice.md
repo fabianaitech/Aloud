@@ -11,7 +11,16 @@ Claude Code session ──Stop hook──▶ Aloud daemon ──clip──▶ iP
         └──inbox socket◀── reply ◀── transcribe on the Mac ◀── audio
 ```
 
-Everything stays on your own devices. The phone reaches the Mac over your
+Everything stays on your own devices.
+
+- **Audio starts after the first sentence.** The Mac sends each sentence-sized
+  piece as soon as it is synthesized, and the phone highlights the sentence
+  being spoken.
+- **You see your words as you speak.** The iPhone transcribes on-device (iOS
+  26+), and the Mac takes over when the phone can't.
+- **The conversation reads like one.** Claude's responses render as markdown,
+  with code blocks and tables, and sessions show under their Claude Code names.
+ The phone reaches the Mac over your
 tailnet through **Tailscale Serve** (HTTPS, tailnet only). Speech is synthesized
 by the engine you already use, and replies are transcribed **on the Mac,
 on-device** (Apple's SpeechTranscriber, with DictationTranscriber for languages
@@ -30,6 +39,7 @@ it lacks, such as Dutch). No cloud service, no API key.
 | Busy session or open permission prompt → reply waits, then delivers | Tested, including a denied prompt |
 | **Claude Desktop** (Code tab) sessions | **Not verified** — see below |
 | Recording with the iPhone microphone | Verified on the iPhone |
+| Live transcription on the iPhone, sentence clips, highlighting, redesigned app | Built and checked in the iOS 27 simulator; live transcription still to try on the device |
 | Background / locked-screen playback | Still to test on the device |
 | Apple Watch | Not built yet — see the plan at the end |
 
@@ -153,14 +163,21 @@ Remove a phone from the Mac side at any time: Remote Voice → the device →
 
 ## Using it
 
+- The header shows the session you're talking to, under its Claude Code name
+  (the automatic one, or whatever you set with `/rename`). It also shows where
+  the session runs (Terminal, Desktop, VS Code) and whether it's ready, working
+  or waiting for a permission answer. Tap it to switch; sessions with new
+  responses show a count.
 - Keep the app open. New responses from the selected session play
-  automatically; others appear with a play button (or turn on *Play responses
-  from all sessions*).
-- **Record** pauses playback first, so the microphone never hears Claude.
-  **Stop** sends the audio to the Mac to transcribe. Edit the text, then
-  **Send**. **Type** skips the microphone.
-- **Replay** and pause work on the latest response.
-- Reply language: Settings → Replies → Language (default: the phone's language).
+  automatically, sentence by sentence, with the spoken sentence highlighted.
+  Tap a response, or its expand button, for the full text with code blocks.
+  Play, pause and replay sit under each response.
+- **Reply** pauses playback first, so the microphone never hears Claude. Your
+  words appear as you speak. **Stop**, edit the text if needed, then send. The
+  keyboard button skips the microphone.
+- Transcription: on the iPhone when it has the language's speech model (a
+  system download, not part of the app), otherwise on the Mac. The language is
+  set under Settings → Replies (default: the phone's language).
 
 ## Security
 

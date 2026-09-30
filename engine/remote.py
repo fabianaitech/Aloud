@@ -360,6 +360,32 @@ def _title(reg):
     return title
 
 
+CLAUDE_SESSIONS = os.path.expanduser("~/.claude/sessions")
+
+
+def _claude_registry():
+    """Claude Code's own list of running sessions, by session id: the name you
+    see in /list-agents ("date query response", or whatever /rename set) and
+    whether it is busy. Only those two fields are read; the files next to
+    these (*.key) are the sessions' inbox keys and are never touched."""
+    out = {}
+    try:
+        names = os.listdir(CLAUDE_SESSIONS)
+    except OSError:
+        return out
+    for n in names:
+        if not n.endswith(".json"):
+            continue
+        j = _read_json(os.path.join(CLAUDE_SESSIONS, n), None)
+        if isinstance(j, dict) and j.get("sessionId"):
+            # A "derived" name is Claude Code's placeholder from the folder
+            # ("projb-6e"); an "auto" one is its summary of the conversation,
+            # and one without a source is what you typed in /rename.
+            name = j.get("name") if j.get("nameSource") != "derived" else None
+            out[j["sessionId"]] = {"name": name, "status": j.get("status")}
+    return out
+
+
 def sessions():
     """Registered sessions, dead ones pruned. What the phone may see: never the
     socket path or its token."""
@@ -368,6 +394,7 @@ def sessions():
         names = os.listdir(SESS_DIR)
     except OSError:
         return out
+    registry = _claude_registry()
     for n in names:
         if not n.endswith(".json"):
             continue
@@ -385,13 +412,17 @@ def sessions():
             continue
         sid = reg["sid"]
         cwd = reg.get("cwd") or ""
+        cc = registry.get(sid, {})
+        # An unnamed session is listed under its id; that's no name to show.
+        name = cc.get("name") if cc.get("name") and not sid.startswith(cc.get("name")) else None
         out.append({
+            "name": name,
             "session_id": sid,
             "project": os.path.basename(cwd.rstrip("/")) or cwd,
             "cwd": cwd,
             "title": _title(reg),
             "entrypoint": reg.get("ep") or "unknown",
-            "state": _state.get(sid, reg.get("state") or "idle"),
+            "state": _state.get(sid, reg.get("state") or cc.get("status") or "idle"),
             "started": reg.get("started"),
             "can_reply": bool(reg.get("sock")),
         })
@@ -432,7 +463,7 @@ def hook(event, sid):
 _clip_lock = threading.Lock()
 
 
-def publish_response(text, speed, session_id=None, event_id=None, cwd=None):
+def publish_response(text, speed, session_id=None, event_id=None, cwd=None, markdown=None):
     """A finished Claude response, for the phone: the text immediately, the
     audio as soon as it is synthesized."""
     if not enabled():
@@ -444,7 +475,9 @@ def publish_response(text, speed, session_id=None, event_id=None, cwd=None):
     cwd = cwd or reg.get("cwd") or ""
     events.append({"type": "response", "id": event_id, "session_id": session_id,
                    "project": os.path.basename(cwd.rstrip("/")) or None,
-                   "text": text, "clip": None})
+                   "text": text, "clip": None,
+                   # As written, for display; `text` is what gets spoken.
+                   "markdown": (markdown or "")[:100_000] or None})
     threading.Thread(target=_make_clip, args=(event_id, session_id, text, speed),
                      daemon=True).start()
 
@@ -591,7 +624,8 @@ class Replies:
             self._save()
         if events and enabled():
             events.append({"type": "reply", "reply_id": r["id"], "session_id": r["session_id"],
-                           "status": status, "error": error, "detail": detail})
+                           "status": status, "error": error, "detail": detail,
+                           "text": r["text"], "created": r["created"]})
 
     def public(self, r):
         return {k: r.get(k) for k in ("id", "session_id", "text", "status", "error",
@@ -683,7 +717,7 @@ class Replies:
             with self.lock:
                 self._set(r, "failed", f"couldn't reach the session: {e}")
             return
-        _state[r["session_id"]] = "busy"   # it is about to start a turn with this
+        hook("busy", r["session_id"])    # it is about to start a turn with this
         with self.lock:
             self._set(r, "sent", detail="sent — waiting for the session to pick it up")
         threading.Thread(target=self._confirm, args=(r, reg.get("tp"), marker), daemon=True).start()

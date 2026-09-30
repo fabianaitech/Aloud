@@ -856,7 +856,7 @@ class Handler(BaseHTTPRequestHandler):
                     enqueue(text, speed)
                 if dest in ("iphone", "both"):
                     remote.publish_response(text, speed, d.get("session_id"),
-                                            d.get("event_id"), d.get("cwd"))
+                                            d.get("event_id"), d.get("cwd"), d.get("markdown"))
             self._json(202, {"queued": True})
         elif p.startswith("/rv/"):
             n = int(self.headers.get("Content-Length", "0") or 0)
