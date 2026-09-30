@@ -11,8 +11,8 @@ import Foundation
 import os
 
 /// Why a clip did or didn't play: Console.app → device → subsystem
-/// com.fabianaitech.AloudRemote, category playback.
-let playbackLog = Logger(subsystem: "com.fabianaitech.AloudRemote", category: "playback")
+/// com.fabianaitech.Aloud, category playback.
+let playbackLog = Logger(subsystem: "com.fabianaitech.Aloud", category: "playback")
 
 @MainActor
 final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {

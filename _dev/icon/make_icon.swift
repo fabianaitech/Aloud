@@ -4,7 +4,7 @@
 //   AppIcon-1024.png                       (master, the wired concept)
 //   AppIcon.iconset/*.png + AppIcon.icns   (wired into build.sh)
 //   alt-*-1024.png                         (colour alternates, for review only)
-//   ../../ios/AloudRemote/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+//   ../../ios/Aloud/Assets.xcassets/AppIcon.appiconset/icon-1024.png
 //                                          (the iPhone app: full bleed, opaque)
 //
 // Drawn rather than downloaded: an icon found online is someone's copyright, and
@@ -141,7 +141,7 @@ writePNG(render(primary, px: 1024), outDir.appendingPathComponent("AppIcon-1024.
 writePNG(render(altTeal, px: 1024), outDir.appendingPathComponent("alt-teal-1024.png"))
 writePNG(render(altCoral, px: 1024), outDir.appendingPathComponent("alt-coral-1024.png"))
 
-let iosIcon = outDir.appendingPathComponent("../../ios/AloudRemote/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
+let iosIcon = outDir.appendingPathComponent("../../ios/Aloud/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
     .standardizedFileURL
 writePNG(render(primary, px: 1024, fullBleed: true), iosIcon)
 

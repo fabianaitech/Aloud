@@ -3,7 +3,7 @@
 // Apple's SpeechAnalyzer (iOS 26+), on-device: SpeechTranscriber where it has
 // the language, DictationTranscriber for the rest (Dutch, for one). The model
 // is an OS-managed download, shared with the system and every other app, not
-// part of Aloud Remote. Until it's on the phone, replies are transcribed on the
+// part of the app. Until it's on the phone, replies are transcribed on the
 // Mac instead, and the download starts in the background.
 
 import AVFoundation
