@@ -897,6 +897,29 @@ def set_serve(on):
     return {"ok": True}
 
 
+def request_allowed(headers, tailnet=False):
+    """Refuse what a web browser could send us. Both ports listen on loopback,
+    and a page you visit can still reach loopback: a cross-site POST, or — with
+    DNS rebinding — a page that reads our answers, pairs itself, and sends
+    "replies" into your Claude sessions. So: no browser Origin at all (the
+    app, the hooks, the CLI and the iPhone app never send one), and the request
+    must be addressed to this machine by name — localhost, or, on the remote
+    port, this Mac's Tailscale name, as Tailscale Serve passes it on."""
+    if headers.get("Origin"):
+        return False
+    host = (headers.get("Host") or "").strip().lower()
+    if host.startswith("["):                      # [::1]:8877
+        name = host[1:host.find("]")] if "]" in host else host
+    else:
+        name = host.rsplit(":", 1)[0] if ":" in host else host
+    if name in ("127.0.0.1", "localhost", "::1"):
+        return True
+    if tailnet:
+        mine = (tailscale_status().get("dns_name") or "").lower()
+        return bool(mine) and name == mine
+    return False
+
+
 # ---- remote HTTP API ---------------------------------------------------------------
 
 _server = None
@@ -938,7 +961,17 @@ class RemoteHandler(BaseHTTPRequestHandler):
             self._error(401, "unauthorized", "this device isn't paired, or was removed")
         return dev
 
+    def _refused(self):
+        if request_allowed(self.headers, tailnet=True):
+            return False
+        log(f"refused {self.command} {urlparse(self.path).path} "
+            f"(host {self.headers.get('Host')!r}, origin {'yes' if self.headers.get('Origin') else 'no'})")
+        self._error(403, "forbidden", "not from this Mac or its tailnet name")
+        return True
+
     def do_GET(self):
+        if self._refused():
+            return
         u = urlparse(self.path)
         q = {k: v[-1] for k, v in parse_qs(u.query).items()}
         dev = self._auth()
@@ -983,6 +1016,8 @@ class RemoteHandler(BaseHTTPRequestHandler):
             self._error(404, "not_found", "no such endpoint")
 
     def do_POST(self):
+        if self._refused():
+            return
         u = urlparse(self.path)
         if u.path == "/v1/pair":
             if not enabled():
