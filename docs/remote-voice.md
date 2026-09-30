@@ -134,8 +134,8 @@ The menu shows *Reachable at https://…* once Serve points at Aloud.
 
 ### 3. The iPhone app (Xcode, no App Store)
 
-1. Open `ios/AloudRemote.xcodeproj` in Xcode.
-2. Target **AloudRemote** → Signing & Capabilities → Team: **Fabian Afatsawo
+1. Open `ios/Aloud.xcodeproj` in Xcode.
+2. Target **Aloud** → Signing & Capabilities → Team: **Fabian Afatsawo
    (Personal Team)**, already set. Change the bundle id if Xcode says it's
    taken.
 3. Connect the iPhone by cable, or over Wi-Fi once paired. Choose it as the run
@@ -154,7 +154,7 @@ The menu shows *Reachable at https://…* once Serve points at Aloud.
 
 1. Mac: Aloud menu → Remote Voice → **Pair iPhone…**. This shows the server
    address and a six-digit code, valid for five minutes and one device.
-2. iPhone: open **Aloud Remote**, enter the address and code, and tap Pair.
+2. iPhone: open **Aloud**, enter the address and code, and tap Pair.
    The token goes into the iPhone's Keychain (this device only). The Mac stores
    only its hash, in `~/.aloud/remote/devices.json` (0600).
 

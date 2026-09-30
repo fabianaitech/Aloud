@@ -203,12 +203,17 @@ def authenticate(header):
     return None
 
 
-def revoke(device_id=None):
+def revoke(device_id=None, everything=False):
+    """Remove one device — or all of them, but only when asked for by name: a
+    request that merely lacks an id must not wipe every pairing."""
+    if not device_id and not everything:
+        raise ValueError("say which device (id), or all: true")
     with _dev_lock:
         before = len(_devices)
-        _devices[:] = [d for d in _devices if device_id and d["id"] != device_id]
+        _devices[:] = [] if everything else [d for d in _devices if d["id"] != device_id]
         _write_json(DEVICES_PATH, _devices)
-        return before - len(_devices)
+    log(f"removed {before - len(_devices)} device(s)")
+    return before - len(_devices)
 
 
 def devices_status():
@@ -1046,7 +1051,10 @@ def handle_local(method, path, body):
             return 409, {"error": "turn Remote Voice on first"}
         return 200, start_pairing()
     if method == "POST" and path == "/rv/revoke":
-        return 200, {"removed": revoke(d.get("id"))}
+        try:
+            return 200, {"removed": revoke(d.get("id"), d.get("all") is True)}
+        except ValueError as e:
+            return 400, {"error": str(e)}
     if method == "POST" and path == "/rv/hook":
         hook(d.get("event"), d.get("session_id"))
         return 200, {"ok": True}

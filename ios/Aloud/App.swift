@@ -4,7 +4,7 @@ import SwiftUI
 import UIKit
 
 @main
-struct AloudRemoteApp: App {
+struct AloudApp: App {
     @StateObject private var model = AppModel()
     @Environment(\.scenePhase) private var phase
 

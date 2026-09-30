@@ -21,7 +21,7 @@ struct PairView: View {
                         .frame(width: 88, height: 88)
                         .overlay { WaveformBars(height: 42) }
                         .shadow(color: .aloud.opacity(0.35), radius: 16, y: 8)
-                    Text("Aloud Remote").font(.largeTitle.bold())
+                    Text("Aloud").font(.largeTitle.bold())
                     Text("Hear Claude on your iPhone, and answer by voice.")
                         .font(.body)
                         .foregroundStyle(.secondary)

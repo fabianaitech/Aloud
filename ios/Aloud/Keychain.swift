@@ -7,7 +7,7 @@ import Foundation
 import Security
 
 enum Keychain {
-    private static let service = "Aloud Remote Voice"
+    private static let service = "Aloud"
 
     static func set(_ value: String?, for account: String) {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
