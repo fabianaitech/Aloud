@@ -8,6 +8,11 @@
 
 import AVFoundation
 import Foundation
+import os
+
+/// Why a clip did or didn't play: Console.app → device → subsystem
+/// com.fabianaitech.AloudRemote, category playback.
+let playbackLog = Logger(subsystem: "com.fabianaitech.AloudRemote", category: "playback")
 
 @MainActor
 final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
@@ -23,19 +28,50 @@ final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var queue: [(id: String, part: Int?, data: Data)] = []
     private var timer: Timer?
 
+    override init() {
+        super.init()
+        // A call, Siri or another app takes the audio: AVAudioPlayer stops
+        // without telling its delegate, so listen for it here — otherwise the
+        // player looks busy forever and every later clip waits behind it.
+        NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification,
+                                               object: nil, queue: .main) { [weak self] note in
+            let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            let options = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            Task { @MainActor in
+                guard let self, let raw, let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+                if type == .began {
+                    self.isPlaying = false
+                    self.stopTimer()
+                } else if AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume),
+                          self.player != nil {
+                    self.resume()
+                }
+            }
+        }
+    }
+
     private func activate() {
         let s = AVAudioSession.sharedInstance()
         try? s.setCategory(.playback, mode: .spokenAudio, options: [])
         try? s.setActive(true)
     }
 
-    /// Play after whatever is playing now.
+    /// Play after whatever is audible now. A new response doesn't wait behind
+    /// one that is paused or was cut off: it starts at once, and the stale one's
+    /// remaining parts go (it can still be replayed).
     func enqueue(id: String, part: Int? = nil, data: Data) {
-        if currentID == nil { play(id: id, part: part, data: data) } else { queue.append((id, part, data)) }
+        let audible = player?.isPlaying == true
+        if currentID == nil || (!audible && currentID != id) {
+            queue.removeAll { $0.id != id }
+            play(id: id, part: part, data: data)
+        } else {
+            queue.append((id, part, data))
+        }
     }
 
     /// Play now, replacing anything playing (replay).
     func play(id: String, part: Int? = nil, data: Data) {
+        playbackLog.info("play \(id, privacy: .public) part \(part ?? -1)")
         stopTimer()
         activate()
         do {

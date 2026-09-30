@@ -115,6 +115,10 @@ final class AppModel: ObservableObject {
     private var streaming: Set<String> = []     // responses playing sentence by sentence
     private var partChain: Task<Void, Never>?   // keeps sentence clips in order
     private var liveFeed: LiveFeed?
+    /// While the app was in the background (locked, another app): what arrives
+    /// in that time plays on return, whatever its age.
+    private var awaySince: Double?
+    private var backSince: Date?
     private var transcriber: AnyObject?         // LiveTranscriber, iOS 26+
 
     private var seq: Int {
@@ -198,6 +202,15 @@ final class AppModel: ObservableObject {
         pollTask = nil
     }
 
+    func enteredBackground() {
+        if awaySince == nil { awaySince = Date().timeIntervalSince1970 }
+    }
+
+    func becameActive() {
+        if awaySince != nil { backSince = Date() }
+        start()
+    }
+
     private func pollLoop() async {
         var backoff: UInt64 = 1
         var needStatus = true
@@ -215,6 +228,10 @@ final class AppModel: ObservableObject {
                     // Recent history, to show what was said — never to play it.
                     let recent = try await api.events(after: max(0, st.seq - 80), logID: nil, wait: 0)
                     for e in recent.events { apply(e, live: false) }
+                    if selectedSessionID == nil,
+                       let newest = responses.last(where: { r in sessions.contains { $0.session_id == r.sessionID } }) {
+                        selectedSessionID = newest.sessionID
+                    }
                     needStatus = false
                 }
                 let page = try await api.events(after: seq, logID: logID)
@@ -229,9 +246,16 @@ final class AppModel: ObservableObject {
                     // last few minutes (a clip missed while Tailscale reconnected).
                     // Older history is shown, not played. Nothing plays twice either
                     // way: `played` remembers.
-                    let live = e.seq > historyUpTo || now - (e.ts ?? 0) < 180
+                    let away = awaySince.map { (e.ts ?? 0) >= $0 } ?? false
+                    let live = e.seq > historyUpTo || now - (e.ts ?? 0) < 180 || away
                     apply(e, live: live)
                     seq = max(seq, e.seq)
+                }
+                // Close the away window once the catch-up has arrived — not on a
+                // stale empty poll that started before the phone locked.
+                if let back = backSince, !page.events.isEmpty || Date().timeIntervalSince(back) > 20 {
+                    backSince = nil
+                    awaySince = nil
                 }
             } catch is CancellationError {
                 return
@@ -276,9 +300,18 @@ final class AppModel: ObservableObject {
                                           text: e.text ?? "", markdown: e.markdown,
                                           ts: e.ts ?? Date().timeIntervalSince1970))
             if responses.count > 200 { responses.removeFirst(responses.count - 200) }
-            if selectedSessionID == nil { selectedSessionID = e.session_id }
+            // With nothing chosen yet, follow what's being said now — not
+            // whatever history happens to come first.
+            if selectedSessionID == nil, live { selectedSessionID = e.session_id }
             if live, let sid = e.session_id, sid != selectedSessionID { unread[sid, default: 0] += 1 }
         case "clip_part":
+            if e.index == 0, let id = e.event_id {
+                playbackLog.info("""
+                    part0 \(id, privacy: .public) live=\(live) auto=\(self.autoPlay) \
+                    recording=\(self.compose == .recording) selected=\(e.session_id == self.selectedSessionID) \
+                    played=\(self.played.contains(id))
+                    """)
+            }
             if let id = e.event_id, let i = responses.firstIndex(where: { $0.id == id }),
                let idx = e.index, idx == responses[i].segments.count, let text = e.text {
                 responses[i].segments.append(Segment(text: text, duration: e.duration ?? 0))
@@ -392,7 +425,11 @@ final class AppModel: ObservableObject {
             break
         }
         micDenied = false
-        player.pause()                 // the microphone must not hear Claude
+        // The microphone must not hear Claude. Stop rather than pause: what was
+        // playing can be replayed, and its remaining sentences mustn't start
+        // up again while you edit your reply.
+        player.stop()
+        streaming.removeAll()
         let feed = LiveFeed()
         do {
             try recorder.start(feed: transcribeOnPhone ? feed : nil)

@@ -24,7 +24,8 @@ struct AloudRemoteApp: App {
         .onChange(of: phase) { _, p in
             // Foreground is the supported mode: listen while open, and pick up
             // exactly where we left off when opened again.
-            if p == .active { model.start() }
+            if p == .active { model.becameActive() }
+            if p == .background { model.enteredBackground() }
         }
     }
 }
