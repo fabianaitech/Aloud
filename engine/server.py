@@ -21,6 +21,10 @@ idle engine nearly free while still being a running engine.
   GET  /state                                   {enabled,paused,speaking,queued,speed,voice,loaded}
   GET  /health                                  "ok"
   POST /speak   {"text": "..."}  -> audio/wav   (legacy: returns audio, no playback)
+  POST /utterance {"text", "speed", "session_id", "event_id", "cwd"}
+                                                a Claude response: routed to the Mac
+                                                and/or the phone (Remote Voice)
+  GET  /rv/status, POST /rv/config|pair|revoke|hook   Remote Voice (see remote.py)
 
 Waking the worker costs ~6s; keeping it costs ~1.2GB. Idle is the common case,
 so the default trades the seconds. Either way this process keeps answering, so
@@ -41,11 +45,13 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import remote
+
 # Stdlib only, on purpose. Importing torch/kokoro here would put ~800MB back into
 # a process that spends almost all its life waiting — see synth.py.
 
 PORT = int(os.environ.get("ALOUD_PORT", "8877"))
-FLAG_DIR = os.path.expanduser("~/.aloud")
+FLAG_DIR = os.environ.get("ALOUD_DIR") or os.path.expanduser("~/.aloud")
 ENABLED_FLAG = os.path.join(FLAG_DIR, "speak.enabled")
 SPEED_FLAG = os.path.join(FLAG_DIR, "speak.speed")
 ENGINE_FLAG = os.path.join(FLAG_DIR, "speak.engine")
@@ -781,6 +787,10 @@ def _warm():
 
 threading.Thread(target=_warm, daemon=True).start()
 
+# Remote Voice: off unless turned on in the menu. Speaks clips with the same
+# synthesis as everything else, so the phone hears the voice you chose.
+remote.init(synth_to_file=synth_to_file, chunk_text=chunk_text, apple_helper=apple_helper)
+
 _idle = f"{IDLE_TIMEOUT:.0f}s idle unload" if IDLE_TIMEOUT > 0 else "idle unload off"
 print(f"[aloud] ready on 127.0.0.1:{PORT} (engine={ENGINE}, "
       f"voice={VOICES[ENGINE]}, speed={DEFAULT_SPEED}, {_idle})", flush=True)
@@ -817,6 +827,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"apple": apple_voices(), "kokoro": kokoro_voices()})
         elif self.path.startswith("/state"):
             self._json(200, state())
+        elif self.path.startswith("/rv/"):
+            self._json(*remote.handle_local("GET", self.path.split("?")[0], None))
         else:
             self.send_response(404)
             self.end_headers()
@@ -831,6 +843,24 @@ class Handler(BaseHTTPRequestHandler):
             if text:
                 enqueue(text, speed)
             self._json(202, {"queued": True})
+        elif p.startswith("/utterance"):
+            # A finished Claude response, from the Stop hook. Unlike /say it
+            # carries which session it came from, so Remote Voice can route it:
+            # the Mac, the phone, or both.
+            d = self._body()
+            text = (d.get("text") or "").strip()
+            speed = float(d.get("speed") or _default_speed)
+            if text:
+                dest = remote.destination()
+                if dest in ("mac", "both"):
+                    enqueue(text, speed)
+                if dest in ("iphone", "both"):
+                    remote.publish_response(text, speed, d.get("session_id"),
+                                            d.get("event_id"), d.get("cwd"))
+            self._json(202, {"queued": True})
+        elif p.startswith("/rv/"):
+            n = int(self.headers.get("Content-Length", "0") or 0)
+            self._json(*remote.handle_local("POST", p.split("?")[0], self.rfile.read(n) if n else b""))
         elif p.startswith("/pause"):
             pause()
             self._json(200, state())

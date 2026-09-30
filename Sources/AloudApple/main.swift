@@ -14,6 +14,8 @@
 //
 // Usage:
 //   aloud-apple voices     print every usable voice as JSON, then exit
+//   aloud-apple transcribe <file> [locale]
+//                          speech to text, on-device (Remote Voice replies)
 //   aloud-apple serve      the worker; same line protocol as synth.py:
 //
 //   <- {"id": 1, "text": "...", "speed": 1.0, "voice": "<id or name>", "out": "/tmp/x.wav"}
@@ -250,7 +252,14 @@ case "voices":
     FileHandle.standardOutput.write(Data([0x0A]))
 case "serve", nil:
     serve()
+case "transcribe":
+    let args = Array(CommandLine.arguments.dropFirst(2))
+    guard let path = args.first else {
+        FileHandle.standardError.write(Data("usage: aloud-apple transcribe <audio file> [locale]\n".utf8))
+        exit(2)
+    }
+    transcribeCommand(path: path, localeID: args.count > 1 ? args[1] : nil)
 default:
-    FileHandle.standardError.write(Data("usage: aloud-apple [voices|serve]\n".utf8))
+    FileHandle.standardError.write(Data("usage: aloud-apple [voices|serve|transcribe]\n".utf8))
     exit(2)
 }

@@ -8,12 +8,13 @@ itself knows nothing about Claude, and none of this is needed to use it.
 |------|------|--------------|
 | `hooks/speak.sh` | `Stop` | Takes Claude's final reply, strips markdown and code, and sends it to Aloud |
 | `hooks/speak-stop.sh` | `UserPromptSubmit` | Barge-in: stops playback when you start typing, so Claude never talks over your next question |
+| `hooks/remote-hook.sh` | `SessionStart`, `UserPromptSubmit`, `Notification`, `Stop`, `SessionEnd` | [Remote Voice](../../docs/remote-voice.md): registers the session so replies from your iPhone can reach it, and tracks whether it is busy |
 | `commands/speak.md` | — | A `/speak` slash command wrapping `control.sh` |
 
 ## Install
 
 ```bash
-cp hooks/speak.sh hooks/speak-stop.sh ~/.claude/hooks/
+cp hooks/speak.sh hooks/speak-stop.sh hooks/remote-hook.sh ~/.claude/hooks/
 cp commands/speak.md ~/.claude/commands/
 chmod +x ~/.claude/hooks/speak*.sh
 ```
@@ -28,6 +29,32 @@ Then wire them in `~/.claude/settings.json`:
     ],
     "UserPromptSubmit": [
       { "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/speak-stop.sh" }] }
+    ]
+  }
+}
+```
+
+For [Remote Voice](../../docs/remote-voice.md), add these alongside. Each is a
+no-op until Remote Voice has been set up:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/remote-hook.sh start" }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/remote-hook.sh busy" }] }
+    ],
+    "Notification": [
+      { "matcher": "permission_prompt",
+        "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/remote-hook.sh permission" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/remote-hook.sh idle" }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/remote-hook.sh end" }] }
     ]
   }
 }

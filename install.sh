@@ -31,7 +31,7 @@ done
 
 echo "==> installing the engine to $DIR"
 mkdir -p "$DIR"
-for f in server.py synth.py control.sh say.sh start.sh stop.sh setup.sh requirements.txt aloud; do
+for f in server.py remote.py synth.py control.sh say.sh start.sh stop.sh setup.sh requirements.txt aloud; do
   cp "$here/engine/$f" "$DIR/$f"
 done
 chmod +x "$DIR"/*.sh "$DIR/aloud"
