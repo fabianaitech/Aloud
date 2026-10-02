@@ -40,6 +40,15 @@ extension Accent {
     var gradient: LinearGradient { LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom) }
 }
 
+extension View {
+    /// The look shared by play and Reply: the same round, accent-filled button.
+    func roundAccent(_ accent: Accent) -> some View {
+        self.buttonStyle(.borderedProminent)
+            .buttonBorderShape(.circle)
+            .tint(accent.top)
+    }
+}
+
 func stateColor(_ state: String?) -> Color {
     switch state {
     case "busy": return .orange
@@ -238,12 +247,26 @@ struct ClaudeBubble: View {
     @EnvironmentObject var model: WatchModel
     let item: WatchLogItem
     let latest: Bool
+    /// Older responses start folded to a few lines, so the Crown gets you past
+    /// them quickly; tap to open one. The latest is always open.
+    @State private var open = false
+
+    private var long: Bool { item.text.count > 110 }
 
     var body: some View {
+        let folded = !latest && !open && long
         VStack(alignment: .leading, spacing: 4) {
             Text(item.text)
                 .font(.footnote)
+                .lineLimit(folded ? 3 : nil)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            if !latest && long {
+                Image(systemName: open ? "chevron.up" : "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityHidden(true)
+            }
             // The latest response is the one with audio: show it playing.
             if latest && model.isCurrentPlaying {
                 ProgressView(value: model.progress).tint(model.accent.top)
@@ -256,7 +279,15 @@ struct ClaudeBubble: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(model.accent.top.opacity(latest && model.isCurrentPlaying ? 0.8 : 0), lineWidth: 1.5)
         }
-        .onTapGesture { if latest { model.togglePlay() } }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if latest {
+                model.togglePlay()
+            } else if long {
+                withAnimation(.snappy) { open.toggle() }
+            }
+        }
+        .accessibilityHint(latest ? "Plays or pauses" : (long ? (open ? "Folds" : "Shows all") : ""))
         .id(item.id)
     }
 }
@@ -291,7 +322,9 @@ struct PlayButton: View {
         Button { model.togglePlay() } label: {
             Image(systemName: model.isCurrentPlaying && model.isPlaying ? "pause.fill" : "play.fill")
                 .foregroundStyle(.white)
+                .contentTransition(.symbolEffect(.replace))
         }
+        .roundAccent(model.accent)
         .disabled(!model.hasClip)
         .accessibilityLabel(model.isCurrentPlaying && model.isPlaying ? "Pause" : "Play")
     }
@@ -307,8 +340,7 @@ struct ReplyButton: View {
             Image(systemName: "mic.fill")
                 .foregroundStyle(.white)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(model.accent.top)
+        .roundAccent(model.accent)
         .disabled(model.state.session?.canReply != true || !model.phoneReachable)
         // Double Tap (thumb and index finger): start a reply without touching the screen.
         .handGestureShortcut(.primaryAction)
