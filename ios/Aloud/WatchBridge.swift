@@ -28,9 +28,18 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         s.activate()
     }
 
+    /// Not `isWatchAppInstalled`: a watch app installed straight from Xcode
+    /// can be reported as missing while it runs fine. Try, and let it fail.
     private var ready: Bool {
         guard let s = session else { return false }
-        return s.activationState == .activated && s.isPaired && s.isWatchAppInstalled
+        return s.activationState == .activated && s.isPaired
+    }
+
+    /// The current state, for answering the watch directly.
+    private func stateReply(_ base: [String: Any]) -> [String: Any] {
+        var out = base
+        if let data = model?.watchState().encoded() { out[WatchMessage.state] = data }
+        return out
     }
 
     /// Send the watch what it shows, if that changed — and the newest clip.
@@ -103,7 +112,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         case WatchMessage.select:
             if let id = message[WatchMessage.session] as? String { model.selectedSessionID = id }
             publish(force: true)
-            return [WatchMessage.ok: true]
+            return stateReply([WatchMessage.ok: true])
         case WatchMessage.send:
             guard let draft = message[WatchMessage.draft] as? String,
                   let text = message[WatchMessage.text] as? String else {
@@ -121,7 +130,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
             return [WatchMessage.ok: true]
         case WatchMessage.refresh:
             publish(force: true)
-            return [WatchMessage.ok: true]
+            return stateReply([WatchMessage.ok: true])
         default:
             return [WatchMessage.ok: false, WatchMessage.error: "unknown request"]
         }

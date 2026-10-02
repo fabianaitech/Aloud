@@ -90,12 +90,33 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
         }
     }
 
+    /// Ask the iPhone for the current state; it answers with it directly, so
+    /// this works even when application context doesn't arrive.
     func refresh() {
-        Task { _ = await ask([WatchMessage.cmd: WatchMessage.refresh]) }
+        Task { applyReply(await ask([WatchMessage.cmd: WatchMessage.refresh])) }
     }
 
     func select(_ id: String) {
-        Task { _ = await ask([WatchMessage.cmd: WatchMessage.select, WatchMessage.session: id]) }
+        Task { applyReply(await ask([WatchMessage.cmd: WatchMessage.select, WatchMessage.session: id])) }
+    }
+
+    private func applyReply(_ reply: [String: Any]?) {
+        if let s = WatchState.decode(reply?[WatchMessage.state] as? Data) { apply(s) }
+    }
+
+    private var poll: Timer?
+
+    /// While the app is in front: a light refresh every 10 seconds, so the
+    /// watch never shows stale state for long, whatever delivery does.
+    func setActive(_ on: Bool) {
+        active = on
+        poll?.invalidate()
+        poll = nil
+        guard on else { return }
+        refresh()
+        poll = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        }
     }
 
     // MARK: playback
