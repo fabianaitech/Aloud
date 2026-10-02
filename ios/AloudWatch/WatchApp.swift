@@ -20,8 +20,7 @@ struct AloudWatchApp: App {
                 }
         }
         .onChange(of: phase, initial: true) { _, p in
-            model.active = (p == .active)
-            if p == .active { model.refresh() }
+            model.setActive(p == .active)
         }
     }
 }

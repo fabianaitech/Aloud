@@ -18,6 +18,8 @@ struct WatchState: Codable, Equatable {
     var sessions: [WatchSession]
     var response: WatchResponse?
     var reply: WatchReply?
+    /// Each session's latest response, so every page has something to show.
+    var latest: [String: WatchResponse] = [:]
 
     static let empty = WatchState(connected: false, mac: nil, accent: "indigo", session: nil,
                                   sessions: [], response: nil, reply: nil)
