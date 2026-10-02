@@ -38,6 +38,15 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
     @Published private(set) var progress: Double = 0
     @Published private(set) var elapsed: TimeInterval = 0
     @AppStorage("autoPlay") var autoPlay = true
+    /// Playback volume, 0...1 of the watch's own volume. The Crown sets it while
+    /// a message plays; remembered between messages.
+    @Published var volume: Double = UserDefaults.standard.object(forKey: "volume") as? Double ?? 1 {
+        didSet {
+            volume = min(1, max(0, volume))
+            player?.volume = Float(volume)
+            UserDefaults.standard.set(volume, forKey: "volume")
+        }
+    }
 
     /// Set by the app when it comes to the front or goes away: clips only play
     /// by themselves while you're looking.
@@ -168,6 +177,7 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
             try AVAudioSession.sharedInstance().setActive(true)
             let p = try AVAudioPlayer(contentsOf: url)
             p.delegate = self
+            p.volume = Float(volume)
             p.play()
             player = p
             playingID = id
