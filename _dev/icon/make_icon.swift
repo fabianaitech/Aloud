@@ -145,6 +145,20 @@ let iosIcon = outDir.appendingPathComponent("../../ios/Aloud/Assets.xcassets/App
     .standardizedFileURL
 writePNG(render(primary, px: 1024, fullBleed: true), iosIcon)
 
+// The watch app: the same square, which watchOS masks to a circle.
+let watchSet = outDir.appendingPathComponent("../../ios/AloudWatch/Assets.xcassets/AppIcon.appiconset").standardizedFileURL
+try? fm.createDirectory(at: watchSet, withIntermediateDirectories: true)
+writePNG(render(primary, px: 1024, fullBleed: true), watchSet.appendingPathComponent("icon-1024.png"))
+try! """
+{
+  "images" : [ { "filename" : "icon-1024.png", "idiom" : "universal", "platform" : "watchos", "size" : "1024x1024" } ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}
+""".write(to: watchSet.appendingPathComponent("Contents.json"), atomically: true, encoding: .utf8)
+try! """
+{ "info" : { "author" : "xcode", "version" : 1 } }
+""".write(to: watchSet.deletingLastPathComponent().appendingPathComponent("Contents.json"), atomically: true, encoding: .utf8)
+
 // The iPhone app's accent colours, each with its own home-screen icon
 // (alternate app icons). Same names and colours as Accent in ios/Aloud/Theme.swift.
 let iosAccents: [Concept] = [

@@ -6,7 +6,36 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A1000000000000000000002D /* AloudWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A10000000000000000000029 /* AloudWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A1000000000000000000002B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000022;
+			remoteInfo = AloudWatch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A1000000000000000000002C /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				A1000000000000000000002D /* AloudWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		A10000000000000000000029 /* AloudWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AloudWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000001 /* Aloud.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Aloud.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000011 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		A1000000000000000000000E /* Aloud-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Aloud-Info.plist"; sourceTree = "<group>"; };
@@ -14,10 +43,19 @@
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A10000000000000000000002 /* Aloud */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Aloud; sourceTree = "<group>"; };
+		A10000000000000000000020 /* AloudWatch */ = {isa = PBXFileSystemSynchronizedRootGroup; path = AloudWatch; sourceTree = "<group>"; };
+		A10000000000000000000021 /* Shared */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Shared; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A10000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000024 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -31,6 +69,8 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000002 /* Aloud */,
+				A10000000000000000000020 /* AloudWatch */,
+				A10000000000000000000021 /* Shared */,
 				A1000000000000000000000E /* Aloud-Info.plist */,
 				A10000000000000000000011 /* Signing.xcconfig */,
 				A10000000000000000000005 /* Products */,
@@ -41,6 +81,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000001 /* Aloud.app */,
+				A10000000000000000000029 /* AloudWatch.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -55,19 +96,45 @@
 				A10000000000000000000008 /* Sources */,
 				A10000000000000000000003 /* Frameworks */,
 				A10000000000000000000009 /* Resources */,
+				A1000000000000000000002C /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A1000000000000000000002A /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A10000000000000000000002 /* Aloud */,
+				A10000000000000000000021 /* Shared */,
 			);
 			name = Aloud;
 			packageProductDependencies = (
 			);
 			productName = Aloud;
 			productReference = A10000000000000000000001 /* Aloud.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A10000000000000000000022 /* AloudWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000026 /* Build configuration list for PBXNativeTarget "AloudWatch" */;
+			buildPhases = (
+				A10000000000000000000023 /* Sources */,
+				A10000000000000000000024 /* Frameworks */,
+				A10000000000000000000025 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000020 /* AloudWatch */,
+				A10000000000000000000021 /* Shared */,
+			);
+			name = AloudWatch;
+			packageProductDependencies = (
+			);
+			productName = AloudWatch;
+			productReference = A10000000000000000000029 /* AloudWatch.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -81,6 +148,9 @@
 				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					A10000000000000000000006 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					A10000000000000000000022 = {
 						CreatedOnToolsVersion = 27.0;
 					};
 				};
@@ -100,12 +170,20 @@
 			projectRoot = "";
 			targets = (
 				A10000000000000000000006 /* Aloud */,
+				A10000000000000000000022 /* AloudWatch */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A10000000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000025 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +200,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000023 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A1000000000000000000002A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000022 /* AloudWatch */;
+			targetProxy = A1000000000000000000002B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A1000000000000000000000C /* Debug */ = {
@@ -225,6 +318,66 @@
 			};
 			name = Release;
 		};
+		A10000000000000000000027 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A10000000000000000000011 /* Signing.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Aloud;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Aloud records your spoken reply so it can be transcribed and sent to Claude.";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "$(ALOUD_BUNDLE_ID)";
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(ALOUD_BUNDLE_ID).watchkitapp";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		A10000000000000000000028 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A10000000000000000000011 /* Signing.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Aloud;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Aloud records your spoken reply so it can be transcribed and sent to Claude.";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "$(ALOUD_BUNDLE_ID)";
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(ALOUD_BUNDLE_ID).watchkitapp";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -242,6 +395,15 @@
 			buildConfigurations = (
 				A1000000000000000000000C /* Debug */,
 				A1000000000000000000000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000000000000000000026 /* Build configuration list for PBXNativeTarget "AloudWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000027 /* Debug */,
+				A10000000000000000000028 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -7,6 +7,7 @@
 // a failure can't deliver it twice.
 
 import AVFoundation
+import Combine
 import Foundation
 import SwiftUI
 import UIKit
@@ -105,6 +106,9 @@ final class AppModel: ObservableObject {
 
     let player = Player()
     let recorder = Recorder()
+    /// The Apple Watch app's link to all of this.
+    let watch = WatchBridge()
+    private var watchUpdates: AnyCancellable?
 
     private let defaults = UserDefaults.standard
     private var api: API?
@@ -139,6 +143,12 @@ final class AppModel: ObservableObject {
             connection = .connecting
         }
         UIApplication.shared.isIdleTimerDisabled = keepScreenOn
+        watch.start(model: self)
+        // Whatever changes here, the watch hears about — at most a few times a
+        // second, and only when what it shows actually changed.
+        watchUpdates = objectWillChange
+            .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
+            .sink { [weak self] in self?.watch.publish() }
     }
 
     // MARK: pairing
@@ -390,16 +400,18 @@ final class AppModel: ObservableObject {
         responses.last { $0.sessionID == selectedSessionID }
     }
 
+    func clipData(for r: ResponseItem) async throws -> Data {
+        guard let name = r.clip, let api else { throw APIError.server("no audio yet") }
+        if let cached = clipCache[name] { return cached }
+        let data = try await api.clip(name)
+        clipCache[name] = data
+        return data
+    }
+
     func playClip(of r: ResponseItem, queue: Bool = false, from start: TimeInterval = 0) async {
-        guard let name = r.clip, let api else { return }
+        guard r.clip != nil else { return }
         do {
-            let data: Data
-            if let cached = clipCache[name] {
-                data = cached
-            } else {
-                data = try await api.clip(name)
-                clipCache[name] = data
-            }
+            let data = try await clipData(for: r)
             if queue { player.enqueue(id: r.id, data: data) } else { player.play(id: r.id, data: data, from: start) }
         } catch {
             if let i = responses.firstIndex(where: { $0.id == r.id }) {
@@ -577,4 +589,44 @@ final class AppModel: ObservableObject {
         }
     }
     #endif
+
+    // MARK: the watch
+
+    /// What the watch shows: the selected session, its latest response, and
+    /// the last reply to it.
+    func watchState() -> WatchState {
+        let ws = sessions.map {
+            WatchSession(id: $0.session_id, name: $0.displayName, project: $0.project,
+                         state: $0.state, canReply: $0.can_reply)
+        }
+        let r = latestResponse
+        let p = replies.last { $0.sessionID == selectedSessionID }
+        return WatchState(
+            connected: connection == .connected,
+            mac: macName,
+            accent: Accent.current.rawValue,
+            session: ws.first { $0.id == selectedSessionID },
+            sessions: ws,
+            response: r.map { WatchResponse(id: $0.id, text: $0.text, ts: $0.ts, duration: $0.duration) },
+            reply: p.map { WatchReply(id: $0.id, text: $0.text, status: $0.status, detail: $0.error ?? $0.detail) })
+    }
+
+    /// A reply spoken on the watch. Its draft id comes from the watch, so a
+    /// retry from there is recognised as the same reply.
+    func sendFromWatch(draft: String, text: String) async throws -> ReplyRecord {
+        guard let sid = selectedSessionID, let api else { throw APIError.server("No session chosen") }
+        let r = try await api.reply(id: draft, sessionID: sid, text: text, inReplyTo: latestResponse?.id)
+        if !replies.contains(where: { $0.id == draft }) {
+            replies.append(ReplyItem(id: draft, sessionID: sid, text: text, created: Date(),
+                                     status: r.status, detail: r.detail, error: r.error))
+        }
+        return r
+    }
+
+    /// A recording from the watch, transcribed on the Mac.
+    func transcribeForWatch(_ url: URL, locale: String?) async throws -> String {
+        guard let api else { throw APIError.server("Not paired with a Mac") }
+        let audio = try Data(contentsOf: url)
+        return try await api.transcribe(audio: audio, locale: locale ?? replyLocale.identifier)
+    }
 }
