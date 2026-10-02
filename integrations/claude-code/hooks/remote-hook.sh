@@ -48,8 +48,15 @@ case "$event" in
 esac
 
 # Tell a running daemon at once (it also reads the files, so a daemon that is
-# down loses nothing).
+# down loses nothing). A prompt you typed goes along, so the phone and watch
+# show your side of the conversation too.
+prompt=""; prompt_id=""
+if [ "$event" = busy ]; then
+  prompt="$(printf '%s' "$input" | jq -r '.prompt // ""' | head -c 4000)"
+  prompt_id="$(printf '%s' "$input" | jq -r '.prompt_id // ""')"
+fi
 curl -s --max-time 1 -X POST "http://127.0.0.1:${ALOUD_PORT:-8877}/rv/hook" \
   -H 'Content-Type: application/json' \
-  --data "$(jq -nc --arg e "$event" --arg s "$sid" '{event:$e, session_id:$s}')" >/dev/null 2>&1
+  --data "$(jq -nc --arg e "$event" --arg s "$sid" --arg p "$prompt" --arg pid "$prompt_id" \
+    '{event:$e, session_id:$s, prompt:$p, prompt_id:$pid}')" >/dev/null 2>&1
 exit 0

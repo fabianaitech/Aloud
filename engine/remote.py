@@ -439,13 +439,21 @@ def _session(sid):
     return next((s for s in sessions() if s["session_id"] == sid), None)
 
 
-def hook(event, sid):
+def hook(event, sid, prompt=None, prompt_id=None):
     """State from the Claude Code hooks: busy on a prompt, waiting on a
     permission prompt, idle when a turn stops. Replies are only delivered to an
     idle session, so a reply never lands mid-turn or on top of a permission
     dialog."""
     if not ID_RE.match(sid or ""):
         return
+    # A prompt typed on the Mac: part of the conversation the phone shows. A
+    # reply the phone sent arrives as a turn too; its tag says so, and the
+    # phone has it already.
+    if (event == "busy" and prompt and prompt.strip() and events and enabled()
+            and "[aloud-reply " not in prompt):
+        pid = prompt_id if ID_RE.match(prompt_id or "") else str(uuid.uuid4())
+        if not events.has("prompt", "id", pid):
+            events.append({"type": "prompt", "id": pid, "session_id": sid, "text": prompt.strip()[:4000]})
     if event in ("busy", "idle", "permission"):
         if _state.get(sid) != event:
             _state[sid] = event
@@ -1140,7 +1148,7 @@ def handle_local(method, path, body):
         except ValueError as e:
             return 400, {"error": str(e)}
     if method == "POST" and path == "/rv/hook":
-        hook(d.get("event"), d.get("session_id"))
+        hook(d.get("event"), d.get("session_id"), d.get("prompt"), d.get("prompt_id"))
         return 200, {"ok": True}
     return 404, {"error": "no such route"}
 

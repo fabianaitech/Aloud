@@ -304,7 +304,7 @@ struct YouBubble: View {
                 .padding(8)
                 .background(model.accent.gradient, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             if let st = item.status, st != "delivered" {
-                Text(st == "failed" ? "Not delivered" : st.capitalized)
+                Text(st == "failed" ? "Not delivered" : st == "mac" ? "On Mac" : st.capitalized)
                     .font(.caption2)
                     .foregroundStyle(st == "failed" ? .red : .secondary)
             }
