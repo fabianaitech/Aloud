@@ -32,6 +32,8 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
     @Published private(set) var selectedID: String?
     private var pendingSelect: (id: String, at: Date)?
     @Published var compose: WatchCompose = .idle
+    /// When the current transcription was asked for, to say "still working".
+    @Published private(set) var transcribeStarted: Date?
     @Published private(set) var isPlaying = false
     @Published private(set) var progress: Double = 0
     @Published private(set) var elapsed: TimeInterval = 0
@@ -251,6 +253,7 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
         stopTimer()
         guard let url = recordingURL, let draft = draftID, let s = session else { compose = .idle; return }
         compose = .transcribing
+        transcribeStarted = Date()
         // The iPhone hands it to the Mac to transcribe: live, in pieces, when
         // it's reachable; otherwise as a queued file transfer.
         Task {
@@ -263,7 +266,7 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
         }
         transcribeTimeout?.cancel()
         transcribeTimeout = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            try? await Task.sleep(nanoseconds: 45_000_000_000)
             guard let self, self.compose == .transcribing else { return }
             self.compose = .failed(self.phoneReachable
                                    ? "Transcription took too long."

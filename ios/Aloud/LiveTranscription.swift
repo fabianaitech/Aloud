@@ -87,6 +87,38 @@ final class LiveTranscriber: @unchecked Sendable {
         return false
     }
 
+    /// A whole recording (from the watch), on this iPhone. Nil when the phone
+    /// can't — no model for the language yet — or heard nothing.
+    static func transcribeFile(_ url: URL, locale: Locale) async -> String? {
+        guard let m = await module(for: locale, volatile: false),
+              await AssetInventory.status(forModules: [m]) == .installed else {
+            await prepare(locale)
+            return nil
+        }
+        do {
+            let analyzer = SpeechAnalyzer(modules: [m])
+            let file = try AVAudioFile(forReading: url)
+            let results: Task<String, Error>
+            if let t = m as? SpeechTranscriber {
+                results = Task { try await t.results.reduce("") { $0 + String($1.text.characters) } }
+            } else if let d = m as? DictationTranscriber {
+                results = Task { try await d.results.reduce("") { $0 + String($1.text.characters) } }
+            } else {
+                return nil
+            }
+            if let last = try await analyzer.analyzeSequence(from: file) {
+                try await analyzer.finalizeAndFinish(through: last)
+            } else {
+                await analyzer.cancelAndFinishNow()
+            }
+            let text = try await results.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? nil : text
+        } catch {
+            playbackLog.error("phone transcription: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
     /// A running transcriber, or nil when this language can't be done on the
     /// phone right now — the caller then uses the Mac.
     static func start(locale: Locale, onText: @escaping @MainActor (String) -> Void) async -> LiveTranscriber? {

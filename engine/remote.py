@@ -792,8 +792,11 @@ def transcribe(audio, locale=None):
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(audio)
+        t0 = time.monotonic()
         out = subprocess.run([helper, "transcribe", path] + ([locale] if locale else []),
                              capture_output=True, text=True, timeout=120)
+        log(f"transcribed {len(audio)} bytes ({locale or 'default'}) in {time.monotonic() - t0:.1f}s, "
+            f"exit {out.returncode}")
         try:
             res = json.loads(out.stdout.strip().splitlines()[-1])
         except (ValueError, IndexError):
