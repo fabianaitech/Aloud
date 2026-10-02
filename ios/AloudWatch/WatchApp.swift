@@ -65,7 +65,7 @@ struct WatchRoot: View {
             Group {
                 switch model.compose {
                 case .idle, .sent:
-                    ChatView()
+                    HomePager()
                 case .recording:
                     RecordingView()
                 case .transcribing:
@@ -94,6 +94,28 @@ struct WatchRoot: View {
     }
 }
 
+// MARK: - Home: sessions on the left, the conversation on the right
+
+/// Two pages: swipe right from the conversation to reach the sessions on the
+/// left; picking one swipes back to its conversation.
+struct HomePager: View {
+    @State private var page = 1
+
+    var body: some View {
+        TabView(selection: $page) {
+            SessionList { withAnimation { page = 1 } }
+                .tag(0)
+            ChatView { withAnimation { page = 0 } }
+                .tag(1)
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        #if DEBUG
+        .onAppear { if UserDefaults.standard.integer(forKey: "rvPage") == 0,
+                       UserDefaults.standard.object(forKey: "rvPage") != nil { page = 0 } }
+        #endif
+    }
+}
+
 // MARK: - The conversation
 
 /// The selected session's conversation, newest at the bottom: what the watch
@@ -101,18 +123,19 @@ struct WatchRoot: View {
 struct ChatView: View {
     @EnvironmentObject var model: WatchModel
     @Environment(\.isLuminanceReduced) private var dimmed
+    /// Go to the sessions page (also reachable by swiping right).
+    let showSessions: () -> Void
 
     var body: some View {
         let log = model.state.log
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    NavigationLink {
-                        SessionList()
-                    } label: {
+                    Button(action: showSessions) {
                         SessionHeader()
                     }
                     .buttonStyle(.plain)
+                    .accessibilityHint("Shows all sessions")
 
                     if !model.phoneReachable || !model.state.connected {
                         Label(model.phoneReachable ? "iPhone isn't connected to the Mac"
@@ -177,7 +200,7 @@ struct SessionHeader: View {
             }
             Spacer(minLength: 0)
             if model.state.sessions.count > 1 {
-                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+                Image(systemName: "chevron.left").font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 6)
@@ -270,7 +293,8 @@ struct ReplyButton: View {
 
 struct SessionList: View {
     @EnvironmentObject var model: WatchModel
-    @Environment(\.dismiss) private var dismiss
+    /// Back to the conversation, after picking.
+    let picked: () -> Void
 
     var body: some View {
         List {
@@ -282,7 +306,7 @@ struct SessionList: View {
             ForEach(model.state.sessions) { s in
                 Button {
                     model.select(s.id)
-                    dismiss()
+                    picked()
                 } label: {
                     HStack(spacing: 8) {
                         Circle().fill(stateColor(s.state)).frame(width: 7, height: 7)
