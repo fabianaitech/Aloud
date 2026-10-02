@@ -206,12 +206,53 @@ struct ChatView: View {
         }
         .animation(.snappy, value: model.isPlaying)
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    WatchSettings()
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .foregroundStyle(.white)
+                }
+                // Secondary: neutral, not the accent.
+                .tint(.gray)
+                .accessibilityLabel("Settings")
+            }
             ToolbarItemGroup(placement: .bottomBar) {
                 PlayButton()
                 Spacer()
                 ReplyButton()
             }
         }
+    }
+}
+
+/// The watch's own choices. The accent colour follows the iPhone's.
+struct WatchSettings: View {
+    @EnvironmentObject var model: WatchModel
+    @AppStorage("autoPlay") private var autoPlay = true
+    @AppStorage("foldOlder") private var foldOlder = true
+
+    var body: some View {
+        List {
+            Section {
+                Toggle("Play new responses automatically", isOn: $autoPlay)
+                Toggle("Fold older messages", isOn: $foldOlder)
+            } footer: {
+                Text("New responses play while Aloud is open on the watch. Volume: swipe left to Now Playing and turn the Crown.")
+            }
+            Section("Mac") {
+                LabeledContent("Name", value: model.state.mac ?? "—")
+                LabeledContent("Status", value: !model.phoneReachable ? "iPhone not reachable"
+                               : model.state.connected ? "Connected" : "iPhone not connected")
+            }
+            Section {
+                LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+            } footer: {
+                Text("The colour follows Aloud on your iPhone (Settings → Appearance).")
+            }
+        }
+        .tint(model.accent.top)
+        .navigationTitle("Settings")
     }
 }
 
@@ -250,8 +291,9 @@ struct ClaudeBubble: View {
     /// Older responses start folded to a few lines, so the Crown gets you past
     /// them quickly; tap to open one. The latest is always open.
     @State private var open = false
+    @AppStorage("foldOlder") private var foldOlder = true
 
-    private var long: Bool { item.text.count > 110 }
+    private var long: Bool { foldOlder && item.text.count > 110 }
 
     var body: some View {
         let folded = !latest && !open && long
