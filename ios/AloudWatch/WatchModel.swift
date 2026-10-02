@@ -7,6 +7,7 @@
 
 import AVFoundation
 import Foundation
+import MediaPlayer
 import SwiftUI
 import WatchConnectivity
 import os
@@ -38,15 +39,6 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
     @Published private(set) var progress: Double = 0
     @Published private(set) var elapsed: TimeInterval = 0
     @AppStorage("autoPlay") var autoPlay = true
-    /// Playback volume, 0...1 of the watch's own volume. The Crown sets it while
-    /// a message plays; remembered between messages.
-    @Published var volume: Double = UserDefaults.standard.object(forKey: "volume") as? Double ?? 1 {
-        didSet {
-            volume = min(1, max(0, volume))
-            player?.volume = Float(volume)
-            UserDefaults.standard.set(volume, forKey: "volume")
-        }
-    }
 
     /// Set by the app when it comes to the front or goes away: clips only play
     /// by themselves while you're looking.
@@ -73,9 +65,64 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
     }
 
     func start() {
+        setUpRemoteCommands()
         guard let s = session else { return }
         s.delegate = self
         s.activate()
+    }
+
+    // MARK: Now Playing
+    //
+    // Aloud tells watchOS what it's playing, like any audio app. The system then
+    // owns the standard controls: the Now Playing page (NowPlayingView), where
+    // the Digital Crown sets the watch's volume, and the play/pause it shows.
+
+    private func setUpRemoteCommands() {
+        let c = MPRemoteCommandCenter.shared()
+        c.playCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.resumeOrPlay() }
+            return .success
+        }
+        c.pauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.pause() }
+            return .success
+        }
+        c.togglePlayPauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.togglePlay() }
+            return .success
+        }
+    }
+
+    private func publishNowPlaying() {
+        guard let player, let r = state.response else {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            return
+        }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+            MPMediaItemPropertyTitle: String(r.text.prefix(60)),
+            MPMediaItemPropertyArtist: state.session?.name ?? "Claude",
+            MPMediaItemPropertyAlbumTitle: "Aloud",
+            MPMediaItemPropertyPlaybackDuration: player.duration,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: player.currentTime,
+            MPNowPlayingInfoPropertyPlaybackRate: player.isPlaying ? 1.0 : 0.0,
+        ]
+    }
+
+    private func resumeOrPlay() {
+        if isCurrentPlaying, let player, !player.isPlaying {
+            player.play()
+            isPlaying = true
+            publishNowPlaying()
+        } else if !isPlaying {
+            playLatest()
+        }
+    }
+
+    private func pause() {
+        guard let player, player.isPlaying else { return }
+        player.pause()
+        isPlaying = false
+        publishNowPlaying()
     }
 
     var accent: Accent { Accent(rawValue: state.accent) ?? .indigo }
@@ -161,6 +208,7 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
     func togglePlay() {
         if isCurrentPlaying, let player {
             if player.isPlaying { player.pause(); isPlaying = false } else { player.play(); isPlaying = true }
+            publishNowPlaying()
             return
         }
         playLatest()
@@ -177,12 +225,12 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
             try AVAudioSession.sharedInstance().setActive(true)
             let p = try AVAudioPlayer(contentsOf: url)
             p.delegate = self
-            p.volume = Float(volume)
             p.play()
             player = p
             playingID = id
             isPlaying = true
             startTimer()
+            publishNowPlaying()
             UserDefaults.standard.set(id, forKey: "played")
         } catch {
             watchLog.error("play: \(error.localizedDescription, privacy: .public)")
@@ -196,6 +244,7 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
         isPlaying = false
         progress = 0
         stopTimer()
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
@@ -204,6 +253,7 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
             self.progress = 0
             self.playingID = nil
             self.stopTimer()
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         }
     }
 

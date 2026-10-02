@@ -10,6 +10,7 @@
 //   • wrist down (always-on), only the session and the text remain, dimmed
 
 import SwiftUI
+import WatchKit
 
 @main
 struct AloudWatchApp: App {
@@ -96,8 +97,9 @@ struct WatchRoot: View {
 
 // MARK: - Home: sessions on the left, the conversation on the right
 
-/// Two pages: swipe right from the conversation to reach the sessions on the
-/// left; picking one swipes back to its conversation.
+/// Three pages: Sessions ← Conversation → Now Playing. Picking a session
+/// swipes back to its conversation. Now Playing is the system's own control:
+/// there the Digital Crown sets the watch's volume, as in Music.
 struct HomePager: View {
     @State private var page = 1
 
@@ -105,13 +107,16 @@ struct HomePager: View {
         TabView(selection: $page) {
             SessionList { withAnimation { page = 1 } }
                 .tag(0)
-            ChatView { withAnimation { page = 0 } }
+            ChatView(showSessions: { withAnimation { page = 0 } },
+                     showVolume: { withAnimation { page = 2 } })
                 .tag(1)
+            NowPlayingView()
+                .tag(2)
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         #if DEBUG
-        .onAppear { if UserDefaults.standard.integer(forKey: "rvPage") == 0,
-                       UserDefaults.standard.object(forKey: "rvPage") != nil { page = 0 } }
+        .onAppear { if UserDefaults.standard.object(forKey: "rvPage") != nil {
+                        page = UserDefaults.standard.integer(forKey: "rvPage") } }
         #endif
     }
 }
@@ -123,10 +128,11 @@ struct HomePager: View {
 struct ChatView: View {
     @EnvironmentObject var model: WatchModel
     @Environment(\.isLuminanceReduced) private var dimmed
-    /// While a message plays, the Crown is the volume knob; otherwise it scrolls.
-    @FocusState private var crownOnVolume: Bool
+
     /// Go to the sessions page (also reachable by swiping right).
     let showSessions: () -> Void
+    /// Go to Now Playing, for the volume (also reachable by swiping left).
+    let showVolume: () -> Void
 
     var body: some View {
         let log = model.state.log
@@ -174,18 +180,22 @@ struct ChatView: View {
             }
         }
         .overlay(alignment: .top) {
+            // While a message plays: one tap to the system volume control.
             if model.isPlaying {
-                VolumeHUD()
-                    .focusable()
-                    .focused($crownOnVolume)
-                    .digitalCrownRotation($model.volume, from: 0, through: 1, by: 0.05,
-                                          sensitivity: .low, isContinuous: false,
-                                          isHapticFeedbackEnabled: true)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                Button(action: showVolume) {
+                    Label("Volume", systemImage: "speaker.wave.2.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(model.accent.top, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .accessibilityHint("Opens Now Playing, where the Digital Crown sets the volume")
             }
         }
         .animation(.snappy, value: model.isPlaying)
-        .onChange(of: model.isPlaying) { _, playing in crownOnVolume = playing }
         .toolbar {
             ToolbarItemGroup(placement: .bottomBar) {
                 PlayButton()
@@ -271,39 +281,6 @@ struct YouBubble: View {
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 18)
         .id(item.id)
-    }
-}
-
-/// The volume, while a message plays: turn the Crown.
-struct VolumeHUD: View {
-    @EnvironmentObject var model: WatchModel
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: model.volume == 0 ? "speaker.slash.fill"
-                  : model.volume < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.3.fill")
-                .font(.caption2)
-                .frame(width: 18)
-                .contentTransition(.symbolEffect(.replace))
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.2))
-                    Capsule().fill(model.accent.top)
-                        .frame(width: geo.size.width * model.volume)
-                }
-            }
-            .frame(height: 5)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(.black.opacity(0.85), in: Capsule())
-        .padding(.horizontal, 18)
-        .accessibilityElement()
-        .accessibilityLabel("Volume")
-        .accessibilityValue("\(Int(model.volume * 100)) percent")
-        .accessibilityAdjustableAction { dir in
-            model.volume += dir == .increment ? 0.1 : -0.1
-        }
     }
 }
 
