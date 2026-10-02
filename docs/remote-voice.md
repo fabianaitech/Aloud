@@ -41,7 +41,7 @@ it lacks, such as Dutch). No cloud service, no API key.
 | Recording with the iPhone microphone | Verified on the iPhone |
 | Live transcription on the iPhone, sentence clips, highlighting, redesigned app | Built and checked in the iOS 27 simulator; live transcription still to try on the device |
 | Background / locked-screen playback | Still to test on the device |
-| Apple Watch | Not built yet — see the plan at the end |
+| Apple Watch | Verified on an Apple Watch Series 10: conversation, playback, Crown volume, spoken replies |
 
 ## How a reply reaches the session
 
@@ -225,27 +225,36 @@ three minutes.
 | Reply *queued — needs a permission answer* | Answer the prompt on the Mac |
 | Reply *failed — session never recorded it* | It may or may not have arrived. Check the Mac before sending again |
 
-## Apple Watch — plan (phase 2)
+## Apple Watch
 
-Not built. The approach to try first, once the iPhone loop is proven on your
-phone:
+The iPhone app carries a watch app. Installing Aloud from Xcode also brings it
+to the watch, with the same 7-day Personal Team signing.
 
-1. **iPhone-mediated.** A watchOS app talks to the iPhone app over
-   WatchConnectivity (`sendMessage` while both are reachable,
-   `transferFile` for clips), with no network code of its own. The iPhone
-   stays the only paired device.
-2. **Short clips.** Aloud already produces AAC. For the watch, a trimmed first
-   sentence or two, with "more on iPhone".
-3. **Push-to-talk.** Record on the watch (`AVAudioRecorder` works on watchOS),
-   hand the file to the iPhone, and reuse the same transcribe → edit → send
-   path. Editing on the watch is limited, so offer *Send* and *Discard*.
-4. **Verify on real hardware** (Series 10): speaker playback volume, the mic,
-   whether the iPhone app must be in the foreground for WatchConnectivity to
-   deliver in time, and background limits on the watch.
+- **Conversation first:** the current session's recent messages, from Claude
+  and from you (spoken on the phone or watch, or typed on the Mac). The
+  Digital Crown scrolls them. Older responses fold to three lines; tap to open
+  one.
+- **Pages:** Sessions ← Conversation → Now Playing. Swipe right for the
+  sessions, left for Apple's Now Playing control, where the Crown sets the
+  volume. While a message plays, a Volume button jumps there.
+- **Reply:** the mic button, or Double Tap (Series 9 and later), records.
+  Double Tap again stops. The recording is transcribed on the iPhone (or the
+  Mac as fallback); check it, then Send (Double Tap a third time). Record
+  Again and Discard sit below.
+- **Settings** (gear): auto-play, folding, connection. The accent colour
+  follows the iPhone.
 
-A watch connecting to the Mac directly (Wi-Fi or LTE through Tailscale) is the
-fallback if WatchConnectivity latency is too high. It needs its own pairing, and
-the watch has no Tailscale app of its own.
+**How it connects:** the watch talks only to the iPhone app
+(WatchConnectivity), never to the Mac. The iPhone sends what to show, the
+latest clip and the recent conversation; it transcribes the watch's
+recordings and sends its replies. So the watch gets new responses while
+**Aloud is open on the iPhone**. A reply from the watch can wake the iPhone
+app briefly to deliver it.
+
+**First-time setup:** in Xcode 27, open the Device Hub with the watch unlocked
+near the iPhone, so Xcode registers it. Then turn on Developer Mode on the watch
+(Settings → Privacy & Security → Developer Mode). That switch only appears
+after Xcode has connected to the watch once.
 
 ## Follow-ups (not blocking)
 
