@@ -45,6 +45,8 @@ struct RootView: View {
         .tint(.aloud)
         // The accent is read while drawing; a new one redraws everything.
         .id(accent)
+        // …and the watch wears it too.
+        .onChange(of: accent) { _, _ in model.watch.publish() }
     }
 }
 
