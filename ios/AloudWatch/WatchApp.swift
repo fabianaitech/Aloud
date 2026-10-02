@@ -69,7 +69,7 @@ struct WatchRoot: View {
                 case .recording:
                     RecordingView()
                 case .transcribing:
-                    BusyView(title: "Transcribing…", icon: "waveform")
+                    TranscribingView()
                 case .review(let text):
                     ReviewView(text: text)
                 case .sending:
@@ -406,6 +406,31 @@ struct ReviewView: View {
             .padding(.bottom, 8)
         }
         .onAppear { edited = text }
+    }
+}
+
+/// Waiting for the transcript — and, if it takes a while, saying why it
+/// might and offering a way out.
+struct TranscribingView: View {
+    @EnvironmentObject var model: WatchModel
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { ctx in
+            let waited = ctx.date.timeIntervalSince(model.transcribeStarted ?? ctx.date)
+            VStack(spacing: 10) {
+                Image(systemName: "waveform")
+                    .font(.title2)
+                    .symbolEffect(.variableColor.iterative, isActive: true)
+                Text("Transcribing…").font(.footnote).foregroundStyle(.secondary)
+                if waited > 15 {
+                    Text("Still working. Is Aloud open on your iPhone?")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                    Button("Cancel", role: .cancel) { model.discard() }
+                }
+            }
+        }
     }
 }
 

@@ -639,9 +639,18 @@ final class AppModel: ObservableObject {
     }
 
     /// A recording from the watch, transcribed on the Mac.
+    /// A recording from the watch: on this iPhone when it has the language's
+    /// model (no Mac round trip), on the Mac otherwise.
     func transcribeForWatch(_ url: URL, locale: String?) async throws -> String {
+        let lang = replyLanguage.isEmpty ? (locale ?? Locale.current.identifier) : replyLanguage
+        if transcribeOnPhone, #available(iOS 26, *),
+           let text = await LiveTranscriber.transcribeFile(url, locale: Locale(identifier: lang)) {
+            playbackLog.info("watch reply transcribed on iPhone")
+            return text
+        }
         guard let api else { throw APIError.server("Not paired with a Mac") }
         let audio = try Data(contentsOf: url)
-        return try await api.transcribe(audio: audio, locale: locale ?? replyLocale.identifier)
+        playbackLog.info("watch reply sent to the Mac to transcribe (\(audio.count) bytes)")
+        return try await api.transcribe(audio: audio, locale: lang)
     }
 }

@@ -11,6 +11,7 @@
 // which is enough to send a reply.
 
 import Foundation
+import UIKit
 import WatchConnectivity
 
 @MainActor
@@ -154,7 +155,19 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         Task { await transcribe(url, draft: draft, locale: locale) }
     }
 
+    /// iOS gives an app woken by the watch only a moment; ask for enough to
+    /// finish the errand (transcribing, sending) and answer the watch.
+    private func withBackgroundTime<T>(_ name: String, _ work: () async -> T) async -> T {
+        let id = UIApplication.shared.beginBackgroundTask(withName: name)
+        defer { if id != .invalid { UIApplication.shared.endBackgroundTask(id) } }
+        return await work()
+    }
+
     private func transcribe(_ url: URL, draft: String, locale: String?) async {
+        await withBackgroundTime("Transcribe watch reply") { await transcribeNow(url, draft: draft, locale: locale) }
+    }
+
+    private func transcribeNow(_ url: URL, draft: String, locale: String?) async {
         guard let model else { return }
         do {
             let text = try await model.transcribeForWatch(url, locale: locale)
@@ -192,7 +205,10 @@ final class WatchBridge: NSObject, WCSessionDelegate {
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any],
                              replyHandler: @escaping ([String: Any]) -> Void) {
-        Task { @MainActor in replyHandler(await self.handle(message)) }
+        Task { @MainActor in
+            let reply = await self.withBackgroundTime("Watch request") { await self.handle(message) }
+            replyHandler(reply)
+        }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
