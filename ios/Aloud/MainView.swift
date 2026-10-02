@@ -450,6 +450,7 @@ struct ReplyBubble: View {
 
     private var icon: String {
         switch reply.status {
+        case "mac": return "laptopcomputer"
         case "queued": return "clock"
         case "sent": return "paperplane"
         case "delivered": return "checkmark.circle.fill"
@@ -459,6 +460,7 @@ struct ReplyBubble: View {
 
     private var label: String {
         switch reply.status {
+        case "mac": return "On your Mac"
         case "queued": return "Queued"
         case "sent": return "Sending"
         case "delivered": return "Delivered"
@@ -470,6 +472,7 @@ struct ReplyBubble: View {
         switch reply.status {
         case "delivered": return .green
         case "failed": return .red
+        case "mac": return .secondary
         default: return .secondary
         }
     }

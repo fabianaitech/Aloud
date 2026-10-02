@@ -364,6 +364,14 @@ final class AppModel: ObservableObject {
                                          status: e.status ?? "queued", detail: e.detail, error: e.error))
                 if replies.count > 200 { replies.removeFirst(replies.count - 200) }
             }
+        case "prompt":
+            // Typed on the Mac: your side of the conversation, from the keyboard.
+            guard let id = e.id, let sid = e.session_id, let text = e.text,
+                  !replies.contains(where: { $0.id == id }) else { return }
+            replies.append(ReplyItem(id: id, sessionID: sid, text: text,
+                                     created: Date(timeIntervalSince1970: e.ts ?? Date().timeIntervalSince1970),
+                                     status: "mac"))
+            if replies.count > 200 { replies.removeFirst(replies.count - 200) }
         case "session":
             Task { try? await refreshSessions() }
         default:
