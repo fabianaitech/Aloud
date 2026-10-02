@@ -609,6 +609,15 @@ final class AppModel: ObservableObject {
             sessions: ws,
             response: r.map { WatchResponse(id: $0.id, text: $0.text, ts: $0.ts, duration: $0.duration) },
             reply: p.map { WatchReply(id: $0.id, text: $0.text, status: $0.status, detail: $0.error ?? $0.detail) },
+            log: timeline.suffix(12).map { item -> WatchLogItem in
+                switch item {
+                case .response(let r):
+                    return WatchLogItem(id: r.id, from: "claude", text: String(r.text.prefix(1500)), ts: r.ts)
+                case .reply(let p):
+                    return WatchLogItem(id: p.id, from: "you", text: String(p.text.prefix(800)),
+                                        ts: p.created.timeIntervalSince1970, status: p.status)
+                }
+            },
             latest: Dictionary(uniqueKeysWithValues: sessions.compactMap { s in
                 responses.last { $0.sessionID == s.session_id }.map {
                     (s.session_id, WatchResponse(id: $0.id, text: String($0.text.prefix(1500)), ts: $0.ts,

@@ -27,6 +27,10 @@ enum WatchCompose: Equatable {
 final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPlayerDelegate {
     @Published private(set) var state: WatchState
     @Published private(set) var phoneReachable = false
+    /// The session page you're on. Set at once when you swipe; the iPhone
+    /// confirms it a moment later.
+    @Published private(set) var selectedID: String?
+    private var pendingSelect: (id: String, at: Date)?
     @Published var compose: WatchCompose = .idle
     @Published private(set) var isPlaying = false
     @Published private(set) var progress: Double = 0
@@ -76,6 +80,13 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
 
     private func apply(_ new: WatchState) {
         state = new
+        // A state sent before your swipe arrived must not swing the page back.
+        if let p = pendingSelect, Date().timeIntervalSince(p.at) < 4, new.session?.id != p.id {
+            // keep the page you chose
+        } else {
+            pendingSelect = nil
+            selectedID = new.session?.id ?? new.sessions.first?.id
+        }
         UserDefaults.standard.set(new.encoded(), forKey: "lastState")
         UserDefaults.standard.set(new.accent, forKey: "accent")
     }
@@ -97,7 +108,22 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
     }
 
     func select(_ id: String) {
+        guard id != selectedID else { return }
+        selectedID = id
+        pendingSelect = (id, Date())
+        stopPlayback()
         Task { applyReply(await ask([WatchMessage.cmd: WatchMessage.select, WatchMessage.session: id])) }
+    }
+
+    /// What a page shows: the selected session's latest response comes with
+    /// the full state, the others from `latest`.
+    func response(for id: String) -> WatchResponse? {
+        id == state.session?.id ? (state.response ?? state.latest[id]) : state.latest[id]
+    }
+
+    func discardAndRecordAgain() async {
+        discard()
+        await startRecording()
     }
 
     private func applyReply(_ reply: [String: Any]?) {
@@ -363,7 +389,10 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
     private func clipArrived(_ id: String) {
         objectWillChange.send()         // hasClip changed
         let alreadyPlayed = UserDefaults.standard.string(forKey: "played") == id
-        guard active, autoPlay, !alreadyPlayed, id == state.response?.id,
+        // Only news plays by itself — not an old response that arrives because
+        // you swiped to its session.
+        let fresh = Date().timeIntervalSince1970 - (state.response?.ts ?? 0) < 180
+        guard active, autoPlay, !alreadyPlayed, fresh, id == state.response?.id,
               compose == .idle || compose == .sent else { return }
         playLatest()
     }

@@ -1,5 +1,13 @@
 // WatchApp.swift — Aloud on the wrist: hear Claude's latest response, and
 // answer it by voice.
+//
+// Built for how a watch is used:
+//   • the conversation first: the Crown scrolls it, newest at the bottom
+//   • tap the session name to switch session
+//   • Double Tap moves the flow on: Reply → Stop → Send
+//   • play/pause and Reply sit in the bottom toolbar, inside the screen's
+//     rounded corners, where a thumb expects them
+//   • wrist down (always-on), only the session and the text remain, dimmed
 
 import SwiftUI
 
@@ -31,6 +39,24 @@ extension Accent {
     var gradient: LinearGradient { LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom) }
 }
 
+func stateColor(_ state: String?) -> Color {
+    switch state {
+    case "busy": return .orange
+    case "permission": return .red
+    case "idle": return .green
+    default: return .gray
+    }
+}
+
+func stateLabel(_ state: String?) -> String {
+    switch state {
+    case "busy": return "Working"
+    case "permission": return "Needs permission"
+    case "idle": return "Ready"
+    default: return ""
+    }
+}
+
 struct WatchRoot: View {
     @EnvironmentObject var model: WatchModel
 
@@ -39,166 +65,206 @@ struct WatchRoot: View {
             Group {
                 switch model.compose {
                 case .idle, .sent:
-                    HomeView()
+                    ChatView()
                 case .recording:
                     RecordingView()
                 case .transcribing:
-                    VStack(spacing: 10) {
-                        ProgressView()
-                        Text("Transcribing…").font(.footnote).foregroundStyle(.secondary)
-                    }
+                    BusyView(title: "Transcribing…", icon: "waveform")
                 case .review(let text):
                     ReviewView(text: text)
                 case .sending:
-                    VStack(spacing: 10) {
-                        ProgressView()
-                        Text("Sending…").font(.footnote).foregroundStyle(.secondary)
-                    }
+                    BusyView(title: "Sending…", icon: "arrow.up.circle")
                 case .failed(let why):
                     FailedView(message: why)
                 }
             }
             .animation(.snappy, value: model.compose)
+            .overlay { if case .sent = model.compose { SentBadge() } }
         }
         .tint(model.accent.top)
+        .sensoryFeedback(trigger: model.compose) { old, new in
+            switch (old, new) {
+            case (_, .recording): return .start
+            case (.recording, _): return .stop
+            case (_, .sent): return .success
+            case (_, .failed): return .error
+            default: return nil
+            }
+        }
     }
 }
 
-// MARK: - Home
+// MARK: - The conversation
 
-struct HomeView: View {
+/// The selected session's conversation, newest at the bottom: what the watch
+/// is mostly for. The Crown scrolls it; tap the session name to switch.
+struct ChatView: View {
     @EnvironmentObject var model: WatchModel
+    @Environment(\.isLuminanceReduced) private var dimmed
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                if !model.phoneReachable || !model.state.connected {
-                    Label(model.phoneReachable ? "iPhone isn't connected to the Mac"
-                                               : "Open Aloud on your iPhone",
-                          systemImage: "iphone.slash")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                }
+        let log = model.state.log
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    NavigationLink {
+                        SessionList()
+                    } label: {
+                        SessionHeader()
+                    }
+                    .buttonStyle(.plain)
 
-                NavigationLink {
-                    SessionList()
-                } label: {
-                    SessionRowLabel(session: model.state.session)
-                }
-                .buttonStyle(.plain)
+                    if !model.phoneReachable || !model.state.connected {
+                        Label(model.phoneReachable ? "iPhone isn't connected to the Mac"
+                                                   : "Open Aloud on your iPhone",
+                              systemImage: "iphone.slash")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
 
-                if let r = model.state.response {
-                    Text(r.text)
-                        .font(.body)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    controls
-                } else {
-                    Text("Claude's next response plays here.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
+                    if log.isEmpty {
+                        Text(model.state.session == nil
+                             ? "Start Claude Code on your Mac."
+                             : "Claude's next response plays here.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 6)
+                    }
 
-                if case .sent = model.compose {
-                    Label("Sent", systemImage: "checkmark.circle.fill")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.green)
-                } else if let p = model.state.reply, p.status != "delivered" {
-                    Label(p.status == "failed" ? "Reply not delivered" : "Reply \(p.status)",
-                          systemImage: p.status == "failed" ? "exclamationmark.circle" : "clock")
-                        .font(.caption2)
-                        .foregroundStyle(p.status == "failed" ? .red : .secondary)
+                    ForEach(log) { item in
+                        if item.from == "you" {
+                            YouBubble(item: item)
+                        } else {
+                            ClaudeBubble(item: item, latest: item.id == model.state.response?.id)
+                        }
+                    }
+                    Color.clear.frame(height: 1).id("bottom")
                 }
+                .padding(.horizontal, 2)
+                .opacity(dimmed ? 0.6 : 1)
             }
-            .padding(.horizontal, 4)
+            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+            .onChange(of: log.last?.id) { _, _ in
+                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
         }
-        .navigationTitle("Aloud")
         .toolbar {
-            // Top right: the one action, never in the way of the text.
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task { await model.startRecording() }
-                } label: {
-                    Image(systemName: "mic.fill")
-                        .foregroundStyle(.white)
-                }
-                .tint(model.accent.top)
-                .buttonStyle(.borderedProminent)
-                .disabled(model.state.session?.canReply != true || !model.phoneReachable)
-                .accessibilityLabel("Reply")
+            ToolbarItemGroup(placement: .bottomBar) {
+                PlayButton()
+                Spacer()
+                ReplyButton()
             }
         }
-    }
-
-    private var controls: some View {
-        HStack(spacing: 12) {
-            Button { model.togglePlay() } label: {
-                Image(systemName: model.isCurrentPlaying && model.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.headline)
-                    .frame(width: 44, height: 44)
-                    .background(model.accent.gradient, in: Circle())
-                    .foregroundStyle(.white)
-            }
-            .buttonStyle(.plain)
-            .disabled(!model.hasClip)
-            .opacity(model.hasClip ? 1 : 0.4)
-            .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
-
-            if model.isCurrentPlaying {
-                ProgressView(value: model.progress).tint(model.accent.top)
-            } else {
-                Text(model.hasClip ? clip : "Audio on its way…")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-            }
-
-            Button { model.replay() } label: {
-                Image(systemName: "gobackward")
-            }
-            .buttonStyle(.plain)
-            .disabled(!model.hasClip)
-            .accessibilityLabel("Play from the start")
-        }
-    }
-
-    private var clip: String {
-        guard let d = model.state.response?.duration else { return "" }
-        let s = Int(d.rounded())
-        return s < 60 ? "\(s) s" : "\(s / 60):\(String(format: "%02d", s % 60))"
     }
 }
 
-struct SessionRowLabel: View {
+struct SessionHeader: View {
     @EnvironmentObject var model: WatchModel
-    let session: WatchSession?
 
     var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(color(session?.state))
-                .frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(session?.name ?? "Choose a session")
+        let s = model.state.session
+        HStack(spacing: 6) {
+            Circle().fill(stateColor(s?.state)).frame(width: 7, height: 7)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(s?.name ?? "Choose a session")
                     .font(.headline)
                     .lineLimit(1)
-                if let s = session, s.name != s.project {
-                    Text(s.project).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
+                Text(s.map { [stateLabel($0.state), $0.name != $0.project ? $0.project : nil]
+                        .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ") } ?? "")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+            if model.state.sessions.count > 1 {
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+            }
         }
-        .padding(8)
-        .background(model.accent.top.opacity(0.18), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(model.accent.top.opacity(0.2), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
-func color(_ state: String?) -> Color {
-    switch state {
-    case "busy": return .orange
-    case "permission": return .red
-    case "idle": return .green
-    default: return .gray
+struct ClaudeBubble: View {
+    @EnvironmentObject var model: WatchModel
+    let item: WatchLogItem
+    let latest: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(item.text)
+                .font(.footnote)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            // The latest response is the one with audio: show it playing.
+            if latest && model.isCurrentPlaying {
+                ProgressView(value: model.progress).tint(model.accent.top)
+            }
+        }
+        .padding(8)
+        .background(Color.white.opacity(latest ? 0.14 : 0.08),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(model.accent.top.opacity(latest && model.isCurrentPlaying ? 0.8 : 0), lineWidth: 1.5)
+        }
+        .onTapGesture { if latest { model.togglePlay() } }
+        .id(item.id)
+    }
+}
+
+struct YouBubble: View {
+    @EnvironmentObject var model: WatchModel
+    let item: WatchLogItem
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(item.text)
+                .font(.footnote)
+                .foregroundStyle(.white)
+                .padding(8)
+                .background(model.accent.gradient, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if let st = item.status, st != "delivered" {
+                Text(st == "failed" ? "Not delivered" : st.capitalized)
+                    .font(.caption2)
+                    .foregroundStyle(st == "failed" ? .red : .secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.leading, 18)
+        .id(item.id)
+    }
+}
+
+struct PlayButton: View {
+    @EnvironmentObject var model: WatchModel
+
+    var body: some View {
+        Button { model.togglePlay() } label: {
+            Image(systemName: model.isCurrentPlaying && model.isPlaying ? "pause.fill" : "play.fill")
+                .foregroundStyle(.white)
+        }
+        .disabled(!model.hasClip)
+        .accessibilityLabel(model.isCurrentPlaying && model.isPlaying ? "Pause" : "Play")
+    }
+}
+
+struct ReplyButton: View {
+    @EnvironmentObject var model: WatchModel
+
+    var body: some View {
+        Button {
+            Task { await model.startRecording() }
+        } label: {
+            Image(systemName: "mic.fill")
+                .foregroundStyle(.white)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(model.accent.top)
+        .disabled(model.state.session?.canReply != true || !model.phoneReachable)
+        // Double Tap (thumb and index finger): start a reply without touching the screen.
+        .handGestureShortcut(.primaryAction)
+        .accessibilityLabel("Reply")
     }
 }
 
@@ -218,16 +284,18 @@ struct SessionList: View {
                     model.select(s.id)
                     dismiss()
                 } label: {
-                    HStack {
-                        Circle().fill(color(s.state)).frame(width: 7, height: 7)
-                        VStack(alignment: .leading) {
+                    HStack(spacing: 8) {
+                        Circle().fill(stateColor(s.state)).frame(width: 7, height: 7)
+                        VStack(alignment: .leading, spacing: 1) {
                             Text(s.name).lineLimit(2)
-                            if s.name != s.project {
+                            if let r = model.state.latest[s.id] {
+                                Text(r.text).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            } else if s.name != s.project {
                                 Text(s.project).font(.caption2).foregroundStyle(.secondary)
                             }
                         }
                         Spacer(minLength: 0)
-                        if s.id == model.state.session?.id {
+                        if s.id == model.selectedID {
                             Image(systemName: "checkmark").foregroundStyle(model.accent.top)
                         }
                     }
@@ -244,27 +312,51 @@ struct RecordingView: View {
     @EnvironmentObject var model: WatchModel
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 6) {
-                Circle().fill(.red).frame(width: 9, height: 9)
-                    .phaseAnimator([0.3, 1.0]) { c, p in c.opacity(p) } animation: { _ in .easeInOut(duration: 0.7) }
-                Text(String(format: "%d:%02d", Int(model.elapsed) / 60, Int(model.elapsed) % 60))
-                    .font(.title3.monospacedDigit())
+        VStack(spacing: 10) {
+            Text("To \(model.state.session?.name ?? "Claude")")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            LiveBars()
+                .frame(height: 30)
+            Text(String(format: "%d:%02d", Int(model.elapsed) / 60, Int(model.elapsed) % 60))
+                .font(.title3.monospacedDigit())
+            Button {
+                model.stopRecording()
+            } label: {
+                Image(systemName: "stop.fill")
+                    .font(.title3)
+                    .frame(width: 58, height: 58)
+                    .background(Color.red, in: Circle())
+                    .foregroundStyle(.white)
             }
-            Text("Listening…").font(.footnote).foregroundStyle(.secondary)
-            HStack(spacing: 14) {
-                Button(role: .cancel) { model.cancelRecording() } label: {
-                    Image(systemName: "xmark")
+            .buttonStyle(.plain)
+            // Double Tap again: stop, and transcribe.
+            .handGestureShortcut(.primaryAction)
+            .accessibilityLabel("Stop and transcribe")
+        }
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button { model.cancelRecording() } label: { Image(systemName: "xmark") }
+                    .accessibilityLabel("Cancel")
+            }
+        }
+    }
+}
+
+/// Aloud's five bars, moving while you speak.
+struct LiveBars: View {
+    private let shape: [CGFloat] = [0.42, 0.73, 1.0, 0.73, 0.42]
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 20)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 4) {
+                ForEach(0..<5, id: \.self) { i in
+                    Capsule()
+                        .fill(.red)
+                        .frame(width: 5, height: 30 * shape[i] * (0.45 + 0.55 * abs(sin(t * 5 + Double(i)))))
                 }
-                .accessibilityLabel("Cancel")
-                Button { model.stopRecording() } label: {
-                    Image(systemName: "stop.fill")
-                        .frame(width: 50, height: 50)
-                        .background(Color.red, in: Circle())
-                        .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Stop and transcribe")
             }
         }
     }
@@ -273,30 +365,75 @@ struct RecordingView: View {
 struct ReviewView: View {
     @EnvironmentObject var model: WatchModel
     let text: String
-    @State private var edited: String = ""
+    @State private var edited = ""
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Reply to \(model.state.session?.name ?? "Claude")")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("To \(model.state.session?.name ?? "Claude")")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 // Tap to correct it, by dictation or Scribble.
                 TextField("Your reply", text: $edited, axis: .vertical)
-                    .lineLimit(2...8)
+                    .lineLimit(2...10)
                 Button {
                     Task { await model.send(edited) }
                 } label: {
-                    Label("Send", systemImage: "arrow.up.circle.fill").frame(maxWidth: .infinity)
+                    Label("Send", systemImage: "arrow.up")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
                 .tint(model.accent.top)
                 .disabled(edited.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button(role: .destructive) { model.discard() } label: {
-                    Text("Discard").frame(maxWidth: .infinity)
+                // Double Tap a third time: send.
+                .handGestureShortcut(.primaryAction)
+                HStack(spacing: 6) {
+                    Button {
+                        Task { await model.discardAndRecordAgain() }
+                    } label: {
+                        Image(systemName: "mic")
+                    }
+                    .accessibilityLabel("Record again")
+                    Button(role: .destructive) { model.discard() } label: {
+                        Image(systemName: "trash")
+                    }
+                    .accessibilityLabel("Discard")
                 }
             }
+            .padding(.bottom, 8)
         }
         .onAppear { edited = text }
+    }
+}
+
+struct BusyView: View {
+    let title: String
+    let icon: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.title2)
+                .symbolEffect(.variableColor.iterative, isActive: true)
+            Text(title).font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct SentBadge: View {
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.green)
+            Text("Sent").font(.headline)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.black.opacity(0.85))
+        .transition(.opacity)
     }
 }
 
@@ -312,7 +449,10 @@ struct FailedView: View {
                     .foregroundStyle(.orange)
                 Text(message).font(.footnote).multilineTextAlignment(.center)
                 if model.draftReviewText != nil {
-                    Button("Try Again") { model.retrySend() }.tint(model.accent.top)
+                    Button("Try Again") { model.retrySend() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(model.accent.top)
+                        .handGestureShortcut(.primaryAction)
                 }
                 Button("Discard", role: .destructive) {
                     model.draftReviewText = nil

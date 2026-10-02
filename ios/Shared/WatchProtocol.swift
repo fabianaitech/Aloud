@@ -18,7 +18,10 @@ struct WatchState: Codable, Equatable {
     var sessions: [WatchSession]
     var response: WatchResponse?
     var reply: WatchReply?
-    /// Each session's latest response, so every page has something to show.
+    /// The selected session's conversation, oldest first: what the watch
+    /// mostly shows.
+    var log: [WatchLogItem] = []
+    /// Each session's latest response (the session list previews it).
     var latest: [String: WatchResponse] = [:]
 
     static let empty = WatchState(connected: false, mac: nil, accent: "indigo", session: nil,
@@ -40,6 +43,17 @@ struct WatchResponse: Codable, Equatable {
     var text: String
     var ts: Double
     var duration: Double?
+}
+
+/// One message in the conversation: Claude's response, or your reply.
+struct WatchLogItem: Codable, Equatable, Identifiable {
+    var id: String
+    /// claude | you
+    var from: String
+    var text: String
+    var ts: Double
+    /// Your replies: queued | sent | delivered | failed
+    var status: String?
 }
 
 struct WatchReply: Codable, Equatable {
