@@ -54,6 +54,9 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     private func sendClip(_ r: ResponseItem) async {
         guard let model, let s = session,
               let data = try? await model.clipData(for: r) else { return }
+        // Watch app open: send it live, in pieces — immediate, where a file
+        // transfer is queued and can take a while. Otherwise, queue the file.
+        if s.isReachable, await sendLive(data, id: r.id, via: s) { return }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("watch-\(r.id).m4a")
         do {
             try data.write(to: url)
@@ -65,6 +68,21 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         } catch {
             playbackLog.error("watch clip: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    private func sendLive(_ data: Data, id: String, via s: WCSession) async -> Bool {
+        let n = (data.count + WatchMessage.chunk - 1) / WatchMessage.chunk
+        for i in 0..<n {
+            let part = data.subdata(in: (i * WatchMessage.chunk)..<min(data.count, (i + 1) * WatchMessage.chunk))
+            let ok: Bool = await withCheckedContinuation { cont in
+                s.sendMessage([WatchMessage.cmd: WatchMessage.clipPart, WatchMessage.event: id,
+                               WatchMessage.index: i, WatchMessage.count: n, WatchMessage.data: part],
+                              replyHandler: { _ in cont.resume(returning: true) },
+                              errorHandler: { _ in cont.resume(returning: false) })
+            }
+            if !ok { return false }
+        }
+        return true
     }
 
     /// Tell the watch, now if it's listening, otherwise queued for when it is.
@@ -98,12 +116,33 @@ final class WatchBridge: NSObject, WCSessionDelegate {
             } catch {
                 return [WatchMessage.ok: false, WatchMessage.error: error.localizedDescription]
             }
+        case WatchMessage.audioPart:
+            receivedAudioPiece(message)
+            return [WatchMessage.ok: true]
         case WatchMessage.refresh:
             publish(force: true)
             return [WatchMessage.ok: true]
         default:
             return [WatchMessage.ok: false, WatchMessage.error: "unknown request"]
         }
+    }
+
+    /// A recording sent live, piece by piece; transcribed once complete.
+    private var audioPieces: [String: [Int: Data]] = [:]
+
+    private func receivedAudioPiece(_ message: [String: Any]) {
+        guard let draft = message[WatchMessage.draft] as? String,
+              let i = message[WatchMessage.index] as? Int,
+              let n = message[WatchMessage.count] as? Int,
+              let data = message[WatchMessage.data] as? Data else { return }
+        audioPieces[draft, default: [:]][i] = data
+        guard let got = audioPieces[draft], got.count == n else { return }
+        audioPieces[draft] = nil
+        let whole = (0..<n).reduce(into: Data()) { $0.append(got[$1] ?? Data()) }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("watch-reply-\(UUID().uuidString).m4a")
+        guard (try? whole.write(to: url)) != nil else { return }
+        let locale = message[WatchMessage.locale] as? String
+        Task { await transcribe(url, draft: draft, locale: locale) }
     }
 
     private func transcribe(_ url: URL, draft: String, locale: String?) async {

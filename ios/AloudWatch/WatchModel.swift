@@ -203,12 +203,17 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
         recorder = nil
         stopTimer()
         guard let url = recordingURL, let draft = draftID, let s = session else { compose = .idle; return }
-        // The iPhone hands it to the Mac to transcribe. A file transfer, so it
-        // gets there even if the iPhone is busy for a moment.
-        s.transferFile(url, metadata: [WatchMessage.cmd: WatchMessage.transcribe,
-                                       WatchMessage.draft: draft,
-                                       WatchMessage.locale: Locale.current.identifier])
         compose = .transcribing
+        // The iPhone hands it to the Mac to transcribe: live, in pieces, when
+        // it's reachable; otherwise as a queued file transfer.
+        Task {
+            if s.isReachable, let data = try? Data(contentsOf: url), await sendLive(data, draft: draft, via: s) {
+                return
+            }
+            s.transferFile(url, metadata: [WatchMessage.cmd: WatchMessage.transcribe,
+                                           WatchMessage.draft: draft,
+                                           WatchMessage.locale: Locale.current.identifier])
+        }
         transcribeTimeout?.cancel()
         transcribeTimeout = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 60_000_000_000)
@@ -217,6 +222,22 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
                                    ? "Transcription took too long."
                                    : "Open Aloud on your iPhone, then try again.")
         }
+    }
+
+    private func sendLive(_ data: Data, draft: String, via s: WCSession) async -> Bool {
+        let n = (data.count + WatchMessage.chunk - 1) / WatchMessage.chunk
+        for i in 0..<n {
+            let part = data.subdata(in: (i * WatchMessage.chunk)..<min(data.count, (i + 1) * WatchMessage.chunk))
+            let ok: Bool = await withCheckedContinuation { cont in
+                s.sendMessage([WatchMessage.cmd: WatchMessage.audioPart, WatchMessage.draft: draft,
+                               WatchMessage.locale: Locale.current.identifier,
+                               WatchMessage.index: i, WatchMessage.count: n, WatchMessage.data: part],
+                              replyHandler: { _ in cont.resume(returning: true) },
+                              errorHandler: { _ in cont.resume(returning: false) })
+            }
+            if !ok { return false }
+        }
+        return true
     }
 
     func cancelRecording() {
@@ -293,6 +314,7 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
     }
 
     nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
+        watchLog.info("file arrived: \(file.metadata?.description ?? "no metadata", privacy: .public)")
         guard file.metadata?[WatchMessage.cmd] as? String == WatchMessage.clip,
               let id = file.metadata?[WatchMessage.event] as? String else { return }
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -300,7 +322,12 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
         let dest = dir.appendingPathComponent("\(id).m4a")
         try? FileManager.default.removeItem(at: dest)
         // The system deletes the file when this returns: move it now.
-        guard (try? FileManager.default.moveItem(at: file.fileURL, to: dest)) != nil else { return }
+        do {
+            try FileManager.default.moveItem(at: file.fileURL, to: dest)
+        } catch {
+            watchLog.error("clip store failed: \(error.localizedDescription, privacy: .public)")
+            return
+        }
         // Keep only the newest few.
         if let all = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) {
             let sorted = all.sorted {
@@ -324,11 +351,44 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
         Task { @MainActor in self.received(message) }
     }
 
+    nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any],
+                             replyHandler: @escaping ([String: Any]) -> Void) {
+        Task { @MainActor in
+            self.received(message)
+            replyHandler([WatchMessage.ok: true])
+        }
+    }
+
+    /// Pieces of a clip sent live, until all have arrived.
+    private var pieces: [String: [Int: Data]] = [:]
+
+    private func receivedPiece(_ message: [String: Any]) {
+        guard let id = message[WatchMessage.event] as? String,
+              let i = message[WatchMessage.index] as? Int,
+              let n = message[WatchMessage.count] as? Int,
+              let data = message[WatchMessage.data] as? Data else { return }
+        pieces[id, default: [:]][i] = data
+        guard let got = pieces[id], got.count == n else { return }
+        pieces[id] = nil
+        let whole = (0..<n).reduce(into: Data()) { $0.append(got[$1] ?? Data()) }
+        do {
+            try whole.write(to: clipURL(id), options: .atomic)
+            watchLog.info("clip \(id, privacy: .public) arrived live, \(whole.count) bytes")
+            clipArrived(id)
+        } catch {
+            watchLog.error("clip store failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
         Task { @MainActor in self.received(userInfo) }
     }
 
     private func received(_ message: [String: Any]) {
+        if message[WatchMessage.cmd] as? String == WatchMessage.clipPart {
+            receivedPiece(message)
+            return
+        }
         guard message[WatchMessage.cmd] as? String == WatchMessage.transcript,
               message[WatchMessage.draft] as? String == draftID, compose == .transcribing else { return }
         transcribeTimeout?.cancel()
@@ -339,4 +399,39 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, AVAudioPl
             compose = .failed(message[WatchMessage.error] as? String ?? "Nothing was heard.")
         }
     }
+
+    #if DEBUG
+    /// Simulator testing without tapping or a microphone. Debug builds only.
+    ///   -rvAudioFile <path to an audio file on the Mac>  — "record" this file
+    ///   -rvAutoSend YES                                   — send what comes back
+    func runDebugLaunchArguments() {
+        let d = UserDefaults.standard
+        watchLog.info("debug args: audio=\(d.string(forKey: "rvAudioFile") ?? "none", privacy: .public)")
+        guard let path = d.string(forKey: "rvAudioFile") else { return }
+        Task {
+            for _ in 0..<40 where !phoneReachable || state.session == nil {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("debug-\(UUID().uuidString).m4a")
+            do {
+                try FileManager.default.copyItem(at: URL(fileURLWithPath: path), to: url)
+            } catch {
+                watchLog.error("debug audio copy failed: \(error.localizedDescription, privacy: .public)")
+            }
+            watchLog.info("debug: reachable=\(self.phoneReachable) session=\(self.state.session?.id ?? "none", privacy: .public)")
+            recordingURL = url
+            draftID = UUID().uuidString
+            compose = .recording
+            stopRecording()
+            guard d.bool(forKey: "rvAutoSend") else { return }
+            for _ in 0..<120 {
+                if case .review(let text) = compose {
+                    await send(text)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+        }
+    }
+    #endif
 }
