@@ -55,11 +55,13 @@ enum WatchMessage {
     // watch → phone
     static let select = "select"        // session
     static let transcribe = "transcribe" // file transfer; draft, locale
+    static let audioPart = "audioPart"  // message; draft, locale, index, count, data — the same, live
     static let send = "send"            // draft, text → ok, status, error
     static let refresh = "refresh"      // ask for the state again
 
     // phone → watch
     static let clip = "clip"            // file transfer; event
+    static let clipPart = "clipPart"    // message; event, index, count, data — the same clip, live
     static let transcript = "transcript" // draft, text | error
 
     // keys
@@ -71,6 +73,11 @@ enum WatchMessage {
     static let error = "error"
     static let ok = "ok"
     static let status = "status"
+    static let index = "index"
+    static let count = "count"
+    static let data = "data"
+    /// Bytes per live clip message: WatchConnectivity messages must stay small.
+    static let chunk = 48_000
 }
 
 extension WatchState {

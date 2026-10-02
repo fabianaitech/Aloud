@@ -12,9 +12,14 @@ struct AloudWatchApp: App {
         WindowGroup {
             WatchRoot()
                 .environmentObject(model)
-                .onAppear { model.start() }
+                .onAppear {
+                    model.start()
+                    #if DEBUG
+                    model.runDebugLaunchArguments()
+                    #endif
+                }
         }
-        .onChange(of: phase) { _, p in
+        .onChange(of: phase, initial: true) { _, p in
             model.active = (p == .active)
             if p == .active { model.refresh() }
         }
@@ -109,20 +114,18 @@ struct HomeView: View {
         }
         .navigationTitle("Aloud")
         .toolbar {
-            ToolbarItemGroup(placement: .bottomBar) {
-                Spacer()
+            // Top right: the one action, never in the way of the text.
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     Task { await model.startRecording() }
                 } label: {
                     Image(systemName: "mic.fill")
-                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white)
                 }
-                .controlSize(.large)
-                .background(model.accent.gradient, in: Circle())
-                .foregroundStyle(.white)
+                .tint(model.accent.top)
+                .buttonStyle(.borderedProminent)
                 .disabled(model.state.session?.canReply != true || !model.phoneReachable)
                 .accessibilityLabel("Reply")
-                Spacer()
             }
         }
     }
