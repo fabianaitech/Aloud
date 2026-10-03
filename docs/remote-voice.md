@@ -144,7 +144,13 @@ The menu shows *Reachable at https://…* once Serve points at Aloud.
 
    Find your team id in Xcode → Settings → Accounts. A free Personal Team
    works. `ios/Signing.xcconfig` explains the fields.
-2. Open `ios/Aloud.xcodeproj` in Xcode.
+2. Run `ios/install.sh`. It builds once and installs the iPhone app **and** the
+   watch app from that one build. Keep the iPhone unlocked and the watch awake;
+   Wi-Fi works once the phone has been paired with Xcode by cable. The two
+   apps must come from the same build: a mismatched pair can lose messages
+   between them, and the watch warns if the build numbers differ. (Or open
+   `ios/Aloud.xcodeproj` in Xcode and run the Aloud scheme, which also
+   installs both.)
 3. Connect the iPhone by cable, or over Wi-Fi once paired. Choose it as the run
    destination and press Run.
 4. On the phone, the first time:

@@ -631,6 +631,7 @@ final class AppModel: ObservableObject {
             sessions: ws,
             response: r.map { WatchResponse(id: $0.id, text: $0.text, ts: $0.ts, duration: $0.duration) },
             reply: p.map { WatchReply(id: $0.id, text: $0.text, status: $0.status, detail: $0.error ?? $0.detail) },
+            build: appBuild,
             log: timeline.suffix(12).map { item -> WatchLogItem in
                 switch item {
                 case .response(let r):
