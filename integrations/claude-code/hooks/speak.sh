@@ -102,8 +102,8 @@ cwd="$(printf '%s' "$input" | jq -r '.cwd // ""' 2>/dev/null)"
 # `markdown` is the response as Claude wrote it, code and all: Remote Voice
 # shows it on the phone. Only the cleaned `text` is spoken.
 payload="$(jq -nc --arg t "$clean" --argjson s "$SPEED" --arg sid "$session_id" \
-  --arg eid "$event_id" --arg cwd "$cwd" --arg md "$text" \
-  '{text:$t, speed:$s, session_id:$sid, event_id:$eid, cwd:$cwd, markdown:$md}')"
+  --arg eid "$event_id" --arg cwd "$cwd" --arg md "$text" --arg tp "$tp" \
+  '{text:$t, speed:$s, session_id:$sid, event_id:$eid, cwd:$cwd, markdown:$md, transcript_path:$tp}')"
 code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST "$BASE/utterance" \
   -H 'Content-Type: application/json' --data "$payload" 2>/dev/null)"
 if [ "$code" = 404 ]; then

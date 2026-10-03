@@ -15,6 +15,7 @@ enum MDBlock: Hashable {
     case quote(String)
     case code(language: String?, text: String)
     case table(rows: [[String]])
+    case image(alt: String, src: String)
     case rule
 }
 
@@ -48,6 +49,25 @@ enum Markdown {
                 continue
             }
             if line.isEmpty { flush(); continue }
+            // An image link on a line: a block of its own, with any text
+            // around it kept as paragraphs.
+            if let re = try? NSRegularExpression(pattern: #"!\[([^\]]*)\]\(<?([^)\s>]+)>?\)"#),
+               case let ns = line as NSString,
+               case let found = re.matches(in: line, range: NSRange(location: 0, length: ns.length)),
+               !found.isEmpty {
+                flush()
+                var at = 0
+                for m in found {
+                    let before = ns.substring(with: NSRange(location: at, length: m.range.location - at))
+                        .trimmingCharacters(in: .whitespaces)
+                    if !before.isEmpty { blocks.append(.paragraph(before)) }
+                    blocks.append(.image(alt: ns.substring(with: m.range(at: 1)), src: ns.substring(with: m.range(at: 2))))
+                    at = m.range.location + m.range.length
+                }
+                let after = ns.substring(from: at).trimmingCharacters(in: .whitespaces)
+                if !after.isEmpty { blocks.append(.paragraph(after)) }
+                continue
+            }
             if line.allSatisfy({ $0 == "-" || $0 == "*" || $0 == "_" }) && line.count >= 3 {
                 flush(); blocks.append(.rule); continue
             }
@@ -184,6 +204,8 @@ struct MarkdownView: View {
                 .padding(10)
             }
             .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+        case .image(let alt, let src):
+            MarkdownImage(alt: alt, src: src)
         case .rule:
             Divider()
         }

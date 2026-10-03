@@ -26,8 +26,10 @@ fire as usual.
 
 Stdlib only, like server.py.
 """
+import base64
 import hashlib
 import hmac
+import shutil
 import json
 import os
 import re
@@ -46,6 +48,13 @@ FLAG_DIR = os.environ.get("ALOUD_DIR") or os.path.expanduser("~/.aloud")
 RV_DIR = os.path.join(FLAG_DIR, "remote")
 SESS_DIR = os.path.join(FLAG_DIR, "sessions")
 CLIPS_DIR = os.path.join(RV_DIR, "clips")
+IMAGES_DIR = os.path.join(RV_DIR, "images")
+CLAUDE_PROJECTS = os.path.expanduser("~/.claude/projects")
+IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp",
+               "image/heic": "heic"}
+IMAGE_EXTS = {"png", "jpg", "jpeg", "gif", "webp", "heic"}
+MAX_IMAGES = 8
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
 CONFIG_PATH = os.path.join(RV_DIR, "config.json")
 DEVICES_PATH = os.path.join(RV_DIR, "devices.json")
 EVENTS_PATH = os.path.join(RV_DIR, "events.jsonl")
@@ -476,7 +485,8 @@ def hook(event, sid, prompt=None, prompt_id=None):
 _clip_lock = threading.Lock()
 
 
-def publish_response(text, speed, session_id=None, event_id=None, cwd=None, markdown=None):
+def publish_response(text, speed, session_id=None, event_id=None, cwd=None, markdown=None,
+                     transcript=None):
     """A finished Claude response, for the phone: the text immediately, the
     audio as soon as it is synthesized."""
     if not enabled():
@@ -486,13 +496,134 @@ def publish_response(text, speed, session_id=None, event_id=None, cwd=None, mark
         return  # the Stop hook re-fired for the same message
     reg = _registration(session_id) or {}
     cwd = cwd or reg.get("cwd") or ""
+    # Images: what Claude looked at in this turn, and image files it links —
+    # each on its own, so one failing doesn't cost the other. The hook's
+    # transcript is this response's; the registration's is a fallback.
+    tp = transcript if transcript and _is_transcript(transcript) else reg.get("tp")
+    images = []
+    try:
+        if tp and _is_transcript(tp) and os.path.isfile(tp):
+            images = _turn_images(tp, event_id)
+    except Exception as e:  # noqa: BLE001 — text and audio matter more than pictures
+        log(f"turn images for {event_id}: {e}")
+    try:
+        markdown, linked = _linked_images(markdown or "", cwd, event_id, start=len(images))
+        images += linked
+    except Exception as e:  # noqa: BLE001
+        log(f"linked images for {event_id}: {e}")
     events.append({"type": "response", "id": event_id, "session_id": session_id,
                    "project": os.path.basename(cwd.rstrip("/")) or None,
                    "text": text, "clip": None,
                    # As written, for display; `text` is what gets spoken.
-                   "markdown": (markdown or "")[:100_000] or None})
+                   "markdown": (markdown or "")[:100_000] or None,
+                   # Pictures from the turn, by name: GET /v1/images/<name>.
+                   "images": [i for i in images if i.get("from") == "turn"] or None})
     threading.Thread(target=_make_clip, args=(event_id, session_id, text, speed),
                      daemon=True).start()
+
+
+def _is_transcript(path):
+    """Only Claude Code's own transcripts — a path from a hook is still a path."""
+    real = os.path.realpath(path)
+    return real.startswith(os.path.realpath(CLAUDE_PROJECTS) + os.sep) and real.endswith(".jsonl")
+
+
+def _save_image(data, ext, name):
+    path = os.path.join(IMAGES_DIR, name)
+    with open(path, "wb") as f:
+        f.write(data)
+    os.chmod(path, 0o600)
+    return path
+
+
+def _turn_images(tp, event_id):
+    """The images in this turn: what Claude looked at (screenshots it read,
+    diagrams it opened) between your prompt and this response. They live in
+    the transcript as tool results; only the recent end is read."""
+    with open(tp, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        f.seek(max(0, f.tell() - 24 * 1024 * 1024))
+        lines = f.read().decode("utf-8", "replace").splitlines()
+    entries = []
+    for line in lines:
+        try:
+            entries.append(json.loads(line))
+        except ValueError:
+            continue
+    end = next((i for i in range(len(entries) - 1, -1, -1) if entries[i].get("uuid") == event_id), None)
+    if end is None:
+        return []
+    found = []
+    for e in reversed(entries[:end]):
+        if e.get("type") != "user":
+            continue
+        content = (e.get("message") or {}).get("content")
+        blocks = content if isinstance(content, list) else []
+        # Back at your prompt (not a tool result): the turn starts here.
+        if not e.get("isMeta") and (isinstance(content, str)
+                                    or any(b.get("type") == "text" for b in blocks if isinstance(b, dict))):
+            break
+        for b in reversed(blocks):
+            inner = b.get("content") if isinstance(b, dict) and b.get("type") == "tool_result" else None
+            for img in reversed(inner if isinstance(inner, list) else []):
+                if not (isinstance(img, dict) and img.get("type") == "image"):
+                    continue
+                src = img.get("source") or {}
+                if src.get("type") == "base64" and src.get("media_type") in IMAGE_TYPES:
+                    found.append(src)
+        if len(found) >= MAX_IMAGES:
+            break
+    out = []
+    for n, src in enumerate(reversed(found[:MAX_IMAGES])):
+        data = base64.b64decode(src["data"])
+        if len(data) > MAX_IMAGE_BYTES:
+            continue
+        name = f"{event_id}-{n}.{IMAGE_TYPES[src['media_type']]}"
+        _save_image(data, IMAGE_TYPES[src["media_type"]], name)
+        out.append({"name": name, "from": "turn"})
+    return out
+
+
+_LINK = re.compile(r"!\[([^\]]*)\]\(<?([^)\s>]+)>?\)")
+
+
+def _linked_images(markdown, cwd, event_id, start=0):
+    """Image files the response links to (`![…](shot.png)`), copied so the phone
+    can show them: the link becomes aloud-image:<name>. Only images, only
+    files that exist, never more than MAX_IMAGES — a link is not a licence to
+    read the disk. Web images stay as they are; the phone loads those itself."""
+    out = []
+
+    def swap(m):
+        alt, src = m.group(1), m.group(2)
+        if re.match(r"^(https?|aloud-image):", src) or len(out) >= MAX_IMAGES:
+            return m.group(0)
+        path = os.path.expanduser(src[7:] if src.startswith("file://") else src)
+        if not os.path.isabs(path):
+            path = os.path.join(cwd or "", path)
+        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+        if ext not in IMAGE_EXTS or not os.path.isfile(path) or os.path.getsize(path) > MAX_IMAGE_BYTES:
+            return m.group(0)
+        name = f"{event_id}-{start + len(out)}.{'jpg' if ext == 'jpeg' else ext}"
+        shutil.copyfile(path, os.path.join(IMAGES_DIR, name))
+        os.chmod(os.path.join(IMAGES_DIR, name), 0o600)
+        out.append({"name": name, "from": "link"})
+        return f"![{alt}](aloud-image:{name})"
+
+    return _LINK.sub(swap, markdown), out
+
+
+def _prune_images():
+    try:
+        files = sorted((os.path.join(IMAGES_DIR, n) for n in os.listdir(IMAGES_DIR)),
+                       key=os.path.getmtime)
+    except OSError:
+        return
+    for p in files[:-300]:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
 
 
 def _aac(wav, out):
@@ -546,6 +677,7 @@ def _make_clip(event_id, session_id, text, speed):
                 except OSError:
                     pass
             _prune_clips()
+            _prune_images()
 
 
 def _concat(parts, out):
@@ -1020,6 +1152,22 @@ class RemoteHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "private, max-age=86400")
             self.end_headers()
             self.wfile.write(data)
+        elif u.path.startswith("/v1/images/"):
+            name = os.path.basename(u.path)
+            path = os.path.join(IMAGES_DIR, name)
+            m = re.match(r"^[A-Za-z0-9-]{8,64}-\d+\.(png|jpg|gif|webp|heic)$", name)
+            if not m or not os.path.isfile(path):
+                return self._error(404, "not_found", "no such image (it may have been pruned)")
+            with open(path, "rb") as f:
+                data = f.read()
+            kinds = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif",
+                     "webp": "image/webp", "heic": "image/heic"}
+            self.send_response(200)
+            self.send_header("Content-Type", kinds[m.group(1)])
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "private, max-age=86400")
+            self.end_headers()
+            self.wfile.write(data)
         elif u.path.startswith("/v1/replies/"):
             r = replies.get(os.path.basename(u.path))
             self._json(200, r) if r else self._error(404, "not_found", "no such reply")
@@ -1156,7 +1304,7 @@ def handle_local(method, path, body):
 def init(synth_to_file, chunk_text, apple_helper):
     global _synth, _chunk, _helper, events, replies, _devices
     _synth, _chunk, _helper = synth_to_file, chunk_text, apple_helper
-    for d in (RV_DIR, CLIPS_DIR, SESS_DIR):
+    for d in (RV_DIR, CLIPS_DIR, SESS_DIR, IMAGES_DIR):
         _private_dir(d)
     _load_config()
     _write_json(CONFIG_PATH, _cfg)

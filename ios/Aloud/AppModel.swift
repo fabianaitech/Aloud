@@ -24,6 +24,8 @@ struct ResponseItem: Identifiable, Equatable {
     var duration: Double?
     /// The spoken pieces, as they arrive: the text shown and highlighted.
     var segments: [Segment] = []
+    /// Pictures from the turn (what Claude looked at), by name on the Mac.
+    var images: [String] = []
 }
 
 struct ReplyItem: Identifiable, Equatable {
@@ -306,9 +308,11 @@ final class AppModel: ObservableObject {
         switch e.type {
         case "response":
             guard let id = e.id, !responses.contains(where: { $0.id == id }) else { return }
-            responses.append(ResponseItem(id: id, sessionID: e.session_id, project: e.project,
-                                          text: e.text ?? "", markdown: e.markdown,
-                                          ts: e.ts ?? Date().timeIntervalSince1970))
+            var item = ResponseItem(id: id, sessionID: e.session_id, project: e.project,
+                                    text: e.text ?? "", markdown: e.markdown,
+                                    ts: e.ts ?? Date().timeIntervalSince1970)
+            item.images = (e.images ?? []).map(\.name)
+            responses.append(item)
             if responses.count > 200 { responses.removeFirst(responses.count - 200) }
             // With nothing chosen yet, follow what's being said now — not
             // whatever history happens to come first.
@@ -406,6 +410,16 @@ final class AppModel: ObservableObject {
 
     var latestResponse: ResponseItem? {
         responses.last { $0.sessionID == selectedSessionID }
+    }
+
+    private var imageCache: [String: UIImage] = [:]
+
+    /// A picture from the Mac, cached for the session.
+    func image(named name: String) async -> UIImage? {
+        if let hit = imageCache[name] { return hit }
+        guard let api, let data = try? await api.image(name), let img = UIImage(data: data) else { return nil }
+        imageCache[name] = img
+        return img
     }
 
     func clipData(for r: ResponseItem) async throws -> Data {

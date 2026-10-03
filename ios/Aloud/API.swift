@@ -46,6 +46,12 @@ struct RemoteSession: Codable, Identifiable, Hashable {
     }
 }
 
+/// A picture that came with a response, served by the Mac: GET /v1/images/<name>.
+struct ImageRef: Codable, Equatable {
+    let name: String
+    let from: String?
+}
+
 /// One spoken piece of a response: the phone highlights it while it plays.
 struct Segment: Codable, Equatable {
     let text: String
@@ -70,6 +76,7 @@ struct RemoteEvent: Codable {
     let error: String?
     let index: Int?          // clip_part: which sentence
     let segments: [Segment]? // clip: what each part says, in order
+    let images: [ImageRef]?  // response: pictures from the turn
     // reply
     let reply_id: String?
     let status: String?
@@ -233,6 +240,10 @@ final class API {
 
     func clip(_ name: String) async throws -> Data {
         try await send("/v1/clips/\(name)", timeout: 60)
+    }
+
+    func image(_ name: String) async throws -> Data {
+        try await send("/v1/images/\(name)", timeout: 60)
     }
 
     func transcribe(audio: Data, locale: String?) async throws -> String {
