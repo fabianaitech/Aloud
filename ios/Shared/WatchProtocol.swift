@@ -18,6 +18,10 @@ struct WatchState: Codable, Equatable {
     var sessions: [WatchSession]
     var response: WatchResponse?
     var reply: WatchReply?
+    /// The iPhone app's build number. The watch compares it with its own: the
+    /// two must come from one build (ios/install.sh), or messages can go
+    /// missing between them. Optional so an older iPhone app still decodes.
+    var build: String?
     /// The selected session's conversation, oldest first: what the watch
     /// mostly shows.
     var log: [WatchLogItem] = []
@@ -95,6 +99,10 @@ enum WatchMessage {
     /// Bytes per live clip message: WatchConnectivity messages must stay small.
     static let chunk = 48_000
 }
+
+/// This app's build number (CFBundleVersion); install.sh stamps both apps
+/// with the same one.
+let appBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
 
 extension WatchState {
     func encoded() -> Data? { try? JSONEncoder().encode(self) }

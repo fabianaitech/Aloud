@@ -154,6 +154,13 @@ struct ChatView: View {
                     .buttonStyle(.plain)
                     .accessibilityHint("Shows all sessions")
 
+                    if let phone = model.state.build, phone != appBuild {
+                        Label("iPhone app is build \(phone), this is \(appBuild). Reinstall both from the Mac.",
+                              systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+
                     if !model.phoneReachable || !model.state.connected {
                         Label(model.phoneReachable ? "iPhone isn't connected to the Mac"
                                                    : "Open Aloud on your iPhone",
@@ -247,6 +254,8 @@ struct WatchSettings: View {
             }
             Section {
                 LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                LabeledContent("Watch build", value: appBuild)
+                LabeledContent("iPhone build", value: model.state.build ?? "—")
             } footer: {
                 Text("The colour follows Aloud on your iPhone (Settings → Appearance).")
             }
