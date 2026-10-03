@@ -267,6 +267,10 @@ struct ResponseBubble: View {
                 .onTapGesture(perform: showAll)
             }
 
+            if !response.images.isEmpty {
+                ImageStrip(names: response.images)
+            }
+
             PlaybackBar(response: response)
         }
         .card()
@@ -486,9 +490,14 @@ struct FullResponseSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                MarkdownView(response.markdown ?? response.text)
-                    .textSelection(.enabled)
-                    .padding()
+                VStack(alignment: .leading, spacing: 14) {
+                    MarkdownView(response.markdown ?? response.text)
+                        .textSelection(.enabled)
+                    if !response.images.isEmpty {
+                        ImageStrip(names: response.images)
+                    }
+                }
+                .padding()
             }
             .navigationTitle("Response")
             .navigationBarTitleDisplayMode(.inline)
